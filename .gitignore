@@ -1,0 +1,77 @@
+# === ENVIRONMENT & SECRETS ===
+# Never push your private API keys or database connection strings
+.env
+.env.local
+.env.*.local
+
+# === PYTHON / FASTAPI BACKEND ===
+# Virtual environments (e.g., ragenv, venv)
+venv/
+ragenv/
+ENV/
+env/
+.venv/
+
+# Python compiled files & cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Unit test & linter caches
+.pytest_cache/
+.tox/
+.nox/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# === NODE.JS / REACT FRONTEND ===
+# Dependency directories
+node_modules/
+jspm_packages/
+
+# Production builds
+dist/
+build/
+
+# Vite cache
+.vite/
+
+# === OS & IDE FILES ===
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# IDEs & Editors (VS Code, PyCharm, WebStorm)
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+.history/
