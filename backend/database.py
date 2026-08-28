@@ -11,6 +11,8 @@ COLLECTION_NAME = os.getenv("MONGODB_COLLECTION_NAME", "documents")
 client = AsyncIOMotorClient(MONGODB_URI)
 db = client[DB_NAME]
 collection = db[COLLECTION_NAME]
+users_collection = db["users"]
+chats_collection = db["chats"]
 
 async def check_db_connection():
     try:
