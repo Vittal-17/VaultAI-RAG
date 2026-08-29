@@ -130,11 +130,68 @@ class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         from main import get_current_user
         app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
 
-        response = client.post("/chat", json={"message": "Crash it"})
+        response = client.post("/chat", json={"message": "Crash it"}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
 
         app.dependency_overrides = {}
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.json()["detail"], "Failed to generate response. Please try again.")
+
+    def test_6_csrf_get_without_token(self):
+        """1. GET request without CSRF token"""
+        response = client.get('/api/csrf')
+        self.assertEqual(response.status_code, 200)
+
+    def test_7_csrf_post_without_token(self):
+        """2. POST without CSRF token"""
+        response = client.post('/api/logout')
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("CSRF validation failed", response.json()["detail"])
+
+    def test_8_csrf_patch_without_token(self):
+        """3. PATCH without CSRF token"""
+        response = client.patch('/api/chats/123/title')
+        self.assertEqual(response.status_code, 403)
+
+    def test_9_csrf_delete_without_token(self):
+        """4. DELETE without CSRF token"""
+        response = client.delete('/api/chats/123')
+        self.assertEqual(response.status_code, 403)
+
+    def test_10_csrf_post_incorrect_token(self):
+        """5. POST with incorrect CSRF token"""
+        response = client.post('/api/logout', cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'def'})
+        self.assertEqual(response.status_code, 403)
+
+    def test_11_csrf_valid_token_and_auth(self):
+        """8, 14, 15. Valid CSRF token + Auth"""
+        cookies = {'csrf_token': 'match'}
+        headers = {'X-CSRF-Token': 'match', 'Origin': 'http://localhost:5173'}
+        # mock auth
+        from main import get_current_user
+        app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
+        response = client.post('/api/chats/new', cookies=cookies, headers=headers)
+        app.dependency_overrides = {}
+        self.assertEqual(response.status_code, 200)
+
+    def test_12_csrf_missing_header(self):
+        """9. Correct token in cookie but missing header"""
+        response = client.post('/api/logout', cookies={'csrf_token': 'abc'})
+        self.assertEqual(response.status_code, 403)
+
+    def test_13_csrf_mismatched_cookie(self):
+        """10. Correct header but mismatched cookie"""
+        response = client.post('/api/logout', cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'xyz'})
+        self.assertEqual(response.status_code, 403)
+
+    def test_14_invalid_origin(self):
+        """11. Invalid Origin"""
+        response = client.post('/api/logout', cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://evil.com'})
+        self.assertEqual(response.status_code, 403)
+
+    def test_15_options_preflight(self):
+        """13. OPTIONS preflight"""
+        response = client.options('/api/logout', headers={'Origin': 'http://localhost:5173', 'Access-Control-Request-Method': 'POST'})
+        self.assertEqual(response.status_code, 200)
 
 class EmojiTestResult(unittest.TextTestResult):
     def addSuccess(self, test):

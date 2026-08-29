@@ -23,6 +23,43 @@ app = FastAPI(title="VaultAI Backend", lifespan=lifespan)
 IS_PRODUCTION = os.getenv("ENVIRONMENT") == "production"
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
+import secrets
+import hmac
+
+class CSRFMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        if request.method == "OPTIONS":
+            return await call_next(request)
+            
+        if request.method in ["POST", "PUT", "PATCH", "DELETE"]:
+            origin = request.headers.get("origin")
+            allowed_origin = os.getenv("FRONTEND_URL", "http://localhost:5173")
+            if origin and origin != allowed_origin:
+                return JSONResponse(status_code=403, content={"detail": "CSRF validation failed."})
+                
+            csrf_cookie = request.cookies.get("csrf_token")
+            csrf_header = request.headers.get("x-csrf-token")
+            
+            if not csrf_cookie or not csrf_header or not hmac.compare_digest(csrf_cookie, csrf_header):
+                return JSONResponse(status_code=403, content={"detail": "CSRF validation failed."})
+                
+        response = await call_next(request)
+        
+        if "csrf_token" not in request.cookies:
+            token = secrets.token_hex(32)
+            response.set_cookie(
+                key="csrf_token",
+                value=token,
+                httponly=False,
+                samesite="lax",
+                secure=IS_PRODUCTION,
+            )
+        return response
+
+app.add_middleware(CSRFMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[os.getenv("FRONTEND_URL", "http://localhost:5173")],
@@ -46,6 +83,10 @@ class GoogleAuthRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     chat_id: str | None = None
+
+@app.get("/api/csrf")
+async def get_csrf():
+    return {"message": "CSRF cookie set"}
 
 async def get_current_user(access_token: str | None = Cookie(None)):
     if not access_token:
