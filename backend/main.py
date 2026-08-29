@@ -9,6 +9,8 @@ from pydantic import BaseModel, EmailStr
 from contextlib import asynccontextmanager
 from datetime import datetime
 import os
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -19,10 +21,11 @@ app = FastAPI(title="VaultAI Backend", lifespan=lifespan)
 
 # Read environment variables
 IS_PRODUCTION = os.getenv("ENVIRONMENT") == "production"
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"], # Update with frontend URLs
+    allow_origins=["http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -37,8 +40,12 @@ class LoginRequest(BaseModel):
     email: EmailStr
     password: str
 
+class GoogleAuthRequest(BaseModel):
+    credential: str
+
 class ChatRequest(BaseModel):
     message: str
+    chat_id: str | None = None
 
 async def get_current_user(access_token: str | None = Cookie(None)):
     if not access_token:
@@ -59,7 +66,7 @@ async def register(request: RegisterRequest, response: Response):
     existing_user = await users_collection.find_one({"email": request.email})
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
-    
+
     hashed_password = get_password_hash(request.password)
     user_doc = {
         "fullname": request.fullname,
@@ -67,9 +74,9 @@ async def register(request: RegisterRequest, response: Response):
         "hashed_password": hashed_password,
         "created_at": datetime.utcnow()
     }
-    
+
     await users_collection.insert_one(user_doc)
-    
+
     access_token = create_access_token(data={"sub": request.email})
     response.set_cookie(
         key="access_token",
@@ -86,7 +93,7 @@ async def login(request: LoginRequest, response: Response):
     user = await users_collection.find_one({"email": request.email})
     if not user or not verify_password(request.password, user["hashed_password"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
-    
+
     access_token = create_access_token(data={"sub": request.email})
     response.set_cookie(
         key="access_token",
@@ -97,6 +104,37 @@ async def login(request: LoginRequest, response: Response):
         max_age=7 * 24 * 60 * 60
     )
     return {"message": "Login successful", "user": {"email": user["email"], "fullname": user["fullname"]}}
+
+@app.post("/api/auth/google")
+async def google_auth(request: GoogleAuthRequest, response: Response):
+    try:
+        idinfo = id_token.verify_oauth2_token(request.credential, google_requests.Request(), GOOGLE_CLIENT_ID,clock_skew_in_seconds=60,)
+        email = idinfo['email']
+        name = idinfo.get('name', 'Google User')
+
+        user = await users_collection.find_one({"email": email})
+        if not user:
+            user_doc = {
+                "email": email,
+                "fullname": name,
+                "hashed_password": None,
+                "auth_provider": "google"
+            }
+            await users_collection.insert_one(user_doc)
+
+        access_token = create_access_token(data={"sub": email})
+        response.set_cookie(
+            key="access_token",
+            value=access_token,
+            httponly=True,
+            samesite="lax",
+            secure=IS_PRODUCTION,
+            max_age=7 * 24 * 60 * 60
+        )
+        return {"message": "Login successful", "user": {"email": email, "fullname": name}}
+    except ValueError as e:
+          print(">>> GOOGLE VERIFY ERROR:", e)
+          raise HTTPException(status_code=401, detail="Invalid Google token")
 
 @app.post("/api/logout")
 async def logout(response: Response):
@@ -166,7 +204,7 @@ async def get_chat(chat_id: str, current_user: dict = Depends(get_current_user))
 async def upload_document(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
-    
+
     try:
         contents = await file.read()
         await process_and_store_document(file.filename, contents, current_user["email"])
@@ -174,7 +212,8 @@ async def upload_document(file: UploadFile = File(...), current_user: dict = Dep
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
+        print(f"CRITICAL ERROR in upload_document: {str(e)}")
+        raise HTTPException(status_code=500, detail="An internal server error occurred while processing the document.")
 
 class TitleRequest(BaseModel):
     title: str
@@ -203,7 +242,7 @@ async def chat(request: ChatRequest, current_user: dict = Depends(get_current_us
     try:
         chat_id = request.chat_id
         is_new_chat = False
-        
+
         if not chat_id:
             chat_id = str(uuid.uuid4())
             is_new_chat = True
@@ -224,7 +263,7 @@ async def chat(request: ChatRequest, current_user: dict = Depends(get_current_us
         chat_title = "New Conversation"
         if not is_new_chat:
             chat_title = chat_exists.get("title", "New Conversation")
-            
+
         generated_title = None
         if chat_title == "New Conversation":
             new_title = await generate_auto_title(request.message)
@@ -255,7 +294,8 @@ async def chat(request: ChatRequest, current_user: dict = Depends(get_current_us
 
         return response_payload
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate response: {str(e)}")
+        print(f"CRITICAL CHAT ERROR: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to generate response. Please try again.")
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

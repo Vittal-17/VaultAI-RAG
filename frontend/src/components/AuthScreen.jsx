@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import { Loader, Mail, Lock, User, Eye, EyeOff } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { GoogleLogin } from '@react-oauth/google';
 
 const AuthScreen = ({ onAuthSuccess }) => {
   const [isLogin, setIsLogin] = useState(true);
@@ -11,6 +12,20 @@ const AuthScreen = ({ onAuthSuccess }) => {
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleGoogleSuccess = async (credentialResponse) => {
+    try {
+      setLoading(true);
+      const res = await axios.post('http://localhost:8000/api/auth/google', {
+        credential: credentialResponse.credential,
+      });
+      toast.success("Google login successful!");
+      onAuthSuccess(res.data.user);
+    } catch (err) {
+      toast.error('Google login failed');
+      setLoading(false);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -145,6 +160,23 @@ const AuthScreen = ({ onAuthSuccess }) => {
             {loading ? <Loader className="w-5 h-5 animate-spin" /> : (isLogin ? 'Sign In' : 'Create Account')}
           </button>
         </form>
+
+        <div className="mt-6 flex items-center justify-center">
+          <div className="border-t border-cyan-300/40 flex-grow"></div>
+          <span className="px-4 text-xs font-semibold text-teal-800/50 uppercase tracking-widest">Or continue with</span>
+          <div className="border-t border-cyan-300/40 flex-grow"></div>
+        </div>
+
+        <div className="mt-6 flex justify-center opacity-90 hover:opacity-100 transition-opacity">
+          <GoogleLogin
+            onSuccess={handleGoogleSuccess}
+            onError={() => toast.error('Google login failed')}
+            theme="outline"
+            size="large"
+            shape="rectangular"
+            text={isLogin ? 'signin_with' : 'signup_with'}
+          />
+        </div>
       </div>
     </div>
   );
