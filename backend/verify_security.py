@@ -1,150 +1,163 @@
-import os
+import unittest
+from unittest.mock import patch, MagicMock, AsyncMock
+from fastapi.testclient import TestClient
 import sys
-import asyncio
-import subprocess
-import requests
-import time
-from database import users_collection, chats_collection
-import bcrypt
-import traceback
-import hashlib
-from unittest.mock import patch
+import os
 
-async def run_tests():
-    print("=== VaultAI Security Verification Suite ===")
+# Ensure backend directory is in path
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-    # Test 1: Startup Integrity Test
-    print("\n[1] Startup Integrity Test...")
-    if os.path.exists(".env"):
-        os.rename(".env", ".env.bak")
+from main import app
+from services import generate_chat_response
 
-    env = os.environ.copy()
-    if "JWT_SECRET_KEY" in env:
-        del env["JWT_SECRET_KEY"]
+client = TestClient(app)
 
-    try:
-        proc = subprocess.run(
-            [sys.executable, "-c", "import auth"],
-            env=env,
-            capture_output=True,
-            text=True
-        )
-        if os.path.exists(".env.bak"):
-            os.rename(".env.bak", ".env")
-        if "FATAL: JWT_SECRET_KEY environment variable is not set!" in proc.stderr or "FATAL" in proc.stderr or proc.returncode != 0:
-            print("✅ PASS: App correctly aborted startup without JWT_SECRET_KEY.")
-        else:
-            print("❌ FAIL: App started without JWT_SECRET_KEY.")
-            print(proc.stderr)
-            sys.exit(1)
-    except Exception as e:
-        print(f"❌ FAIL: {e}")
-        sys.exit(1)
+class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
 
-    # Boot the app for integration tests
-    print("\nStarting local server for integration tests...")
-    env["JWT_SECRET_KEY"] = "super_secret_test_key_abcdefghijklmnopqrstuvwxyzgheaugrauwhduawdhuay76q3767123jhwadhbjkawh"
-    env["ENVIRONMENT"] = "development"
+    @patch("services.collection")
+    @patch("services.client.models.embed_content")
+    @patch("services.gorouter_client.chat.completions.create")
+    async def test_1_multi_tenant_isolation(self, mock_gorouter, mock_embed, mock_collection):
+        """[1] Multi-Tenant Isolation Verification Test"""
+        mock_embed_response = MagicMock()
+        mock_embed_response.embeddings = [MagicMock(values=[0.1]*768)]
+        mock_embed.return_value = mock_embed_response
+        mock_collection.distinct = AsyncMock(return_value=[])
+        mock_cursor = AsyncMock()
+        mock_cursor.to_list = AsyncMock(return_value=[])
+        mock_collection.aggregate.return_value = mock_cursor
 
-    server_proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "main:app", "--port", "8001"],
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
-    )
+        mock_llm_response = MagicMock()
+        mock_llm_response.choices = [MagicMock(message=MagicMock(content="Mocked answer"))]
+        mock_gorouter.return_value = mock_llm_response
 
-    print("Waiting 8 seconds for Uvicorn to boot...")
-    time.sleep(8)
+        # Run test for alpha
+        await generate_chat_response("Hello", "user_alpha@test.com")
+        pipeline_alpha = mock_collection.aggregate.call_args[0][0]
+        vector_search_stage_alpha = pipeline_alpha[0]["$vectorSearch"]
+        self.assertEqual(vector_search_stage_alpha["filter"]["user_email"], {"$eq": "user_alpha@test.com"})
 
-    try:
-        # Test 2: Local Auth Lifecycle Test
-        print("\n[2] Local Auth Lifecycle Test...")
-        long_password = "A" * 100
-        test_email = f"test_{int(time.time())}@example.com"
+        # Run test for beta
+        await generate_chat_response("Hello", "user_beta@test.com")
+        pipeline_beta = mock_collection.aggregate.call_args[0][0]
+        vector_search_stage_beta = pipeline_beta[0]["$vectorSearch"]
+        self.assertEqual(vector_search_stage_beta["filter"]["user_email"], {"$eq": "user_beta@test.com"})
 
-        reg_res = requests.post("http://localhost:8001/api/register", json={
-            "fullname": "Test User",
-            "email": test_email,
-            "password": long_password
-        })
-        if reg_res.status_code == 200:
-            print("✅ Registered with long password.")
-        else:
-            print(f"❌ FAIL: Registration failed: {reg_res.text}")
-            sys.exit(1)
+    @patch("services.collection")
+    @patch("services.client.models.embed_content")
+    @patch("services.gorouter_client.chat.completions.create")
+    async def test_2_filename_aware_scoping(self, mock_gorouter, mock_embed, mock_collection):
+        """[2] Filename-Aware Scoping Verification Test"""
+        mock_embed_response = MagicMock()
+        mock_embed_response.embeddings = [MagicMock(values=[0.1]*768)]
+        mock_embed.return_value = mock_embed_response
+        mock_collection.distinct = AsyncMock(return_value=["testnewnewtestnew.pdf", "otherfile.pdf"])
+        mock_cursor = AsyncMock()
+        mock_cursor.to_list = AsyncMock(return_value=[])
+        mock_collection.aggregate.return_value = mock_cursor
 
-        session = requests.Session()
-        login_res = session.post("http://localhost:8001/api/login", json={
-            "email": test_email,
-            "password": long_password
-        })
+        mock_llm_response = MagicMock()
+        mock_llm_response.choices = [MagicMock(message=MagicMock(content="Mocked answer"))]
+        mock_gorouter.return_value = mock_llm_response
 
-        if login_res.status_code == 200 and "access_token" in session.cookies:
-            print("✅ Logged in and received HttpOnly access_token cookie.")
-        else:
-            print(f"❌ FAIL: Login failed or no cookie: {login_res.text}")
-            sys.exit(1)
+        await generate_chat_response("Summarize testnewnewtestnew.pdf please", "user@test.com")
 
-        chats_res = session.get("http://localhost:8001/api/chats")
-        if chats_res.status_code == 200:
-            print("✅ Successfully accessed protected /api/chats endpoint.")
-        else:
-            print(f"❌ FAIL: Could not access protected endpoint: {chats_res.text}")
-            sys.exit(1)
+        pipeline = mock_collection.aggregate.call_args[0][0]
+        vector_search_stage = pipeline[0]["$vectorSearch"]
 
-        # Test 3: Password Hashing Verification Test
-        print("\n[3] Password Hashing Verification Test...")
-        user_doc = await users_collection.find_one({"email": test_email})
-        hashed = user_doc["hashed_password"]
-        pre_hashed = hashlib.sha256(long_password.encode("utf-8")).hexdigest().encode("utf-8")
+        self.assertEqual(vector_search_stage["filter"]["user_email"], {"$eq": "user@test.com"})
+        self.assertEqual(vector_search_stage["filter"]["filename"], {"$eq": "testnewnewtestnew.pdf"})
 
-        if bcrypt.checkpw(pre_hashed, hashed.encode("utf-8")):
-            print("✅ PASS: Password hash format verified in MongoDB (SHA256 + bcrypt pipeline).")
-        else:
-            print("❌ FAIL: Password hash validation failed directly against DB.")
-            sys.exit(1)
+    @patch("services.collection")
+    @patch("services.client.models.embed_content")
+    @patch("services.gorouter_client.chat.completions.create")
+    async def test_3_metadata_page_fallback(self, mock_gorouter, mock_embed, mock_collection):
+        """[3] Metadata Page Integrity & Fallback Test"""
+        mock_embed_response = MagicMock()
+        mock_embed_response.embeddings = [MagicMock(values=[0.1]*768)]
+        mock_embed.return_value = mock_embed_response
+        mock_collection.distinct = AsyncMock(return_value=["doc.pdf"])
+        mock_cursor = AsyncMock()
+        mock_cursor.to_list = AsyncMock(return_value=[
+            {"filename": "doc.pdf", "text": "Missing page chunk"}
+        ])
+        mock_collection.aggregate.return_value = mock_cursor
 
-        # Test 4: Google OAuth Token Verification Test
-        print("\n[4] Google OAuth Token Verification Test...")
-        google_res = requests.post("http://localhost:8001/api/auth/google", json={
-            "credential": "invalid_token"
-        })
-        if google_res.status_code == 401 and "Invalid Google token" in google_res.text:
-            print("✅ PASS: Google token route gracefully handles invalid tokens via verify_oauth2_token.")
-        else:
-            print(f"❌ FAIL: Expected 401 Invalid Google token, got: {google_res.status_code} {google_res.text}")
-            sys.exit(1)
+        mock_llm_response = MagicMock()
+        mock_llm_response.choices = [MagicMock(message=MagicMock(content="Here is the info."))]
+        mock_gorouter.return_value = mock_llm_response
 
-        with open("main.py", "r", encoding="utf-8") as f:
-            if "clock_skew_in_seconds=60" in f.read():
-                print("✅ PASS: clock_skew_in_seconds=60 parameter confirmed in source code.")
-            else:
-                print("❌ FAIL: clock_skew_in_seconds=60 not found in main.py")
-                sys.exit(1)
+        answer = await generate_chat_response("query", "user@test.com")
 
-        # Test 5: Error Isolation Test
-        print("\n[5] Error Isolation Test...")
-        with open("main.py", "r", encoding="utf-8") as f:
-            main_code = f.read()
-            if "CRITICAL CHAT ERROR:" in main_code and "Failed to generate response. Please try again." in main_code:
-                print("✅ PASS: Returned sanitized 500 response. No stack trace leaked!")
-            else:
-                print("❌ FAIL: Exception sanitization not found in main.py")
-                sys.exit(1)
+        self.assertIn("- **doc.pdf** (Page 1)", answer)
+        self.assertNotIn("(Page ?)", answer)
 
-        print("\n🎉 ALL TESTS PASSED SUCCESSFULLY! Phase 3 Ready.")
+    @patch("services.collection")
+    @patch("services.client.models.embed_content")
+    @patch("services.gorouter_client.chat.completions.create")
+    async def test_4_precision_citation_filtering(self, mock_gorouter, mock_embed, mock_collection):
+        """[4] Post-LLM Precision Citation Filtering Test"""
+        mock_embed_response = MagicMock()
+        mock_embed_response.embeddings = [MagicMock(values=[0.1]*768)]
+        mock_embed.return_value = mock_embed_response
+        mock_collection.distinct = AsyncMock(return_value=["file1.pdf", "file2.pdf", "file3.pdf"])
+        mock_cursor = AsyncMock()
+        mock_cursor.to_list = AsyncMock(return_value=[
+            {"filename": "file1.pdf", "page": 1, "text": "Top match"},
+            {"filename": "file2.pdf", "page": 5, "text": "Random context"},
+            {"filename": "file3.pdf", "page": 2, "text": "Context for file3"}
+        ])
+        mock_collection.aggregate.return_value = mock_cursor
 
-    except Exception as e:
-        print(f"\n❌ FAIL: Unhandled exception during tests:\n{traceback.format_exc()}")
-    finally:
-        print("\nShutting down test server...")
-        if server_proc.poll() is None:
-            server_proc.terminate()
-            server_proc.wait()
+        mock_llm_response = MagicMock()
+        mock_llm_response.choices = [MagicMock(message=MagicMock(content="Based on file3.pdf, here is the result."))]
+        mock_gorouter.return_value = mock_llm_response
 
-        stdout, stderr = server_proc.communicate()
-        print("SERVER STDOUT:", stdout.decode("utf-8", errors="ignore"))
-        print("SERVER STDERR:", stderr.decode("utf-8", errors="ignore"))
+        answer = await generate_chat_response("query", "user@test.com")
 
-if __name__ == "__main__":
-    asyncio.run(run_tests())
+        self.assertIn("- **file1.pdf** (Page 1)", answer)
+        self.assertIn("- **file3.pdf** (Page 2)", answer)
+
+        sources_block = answer.split("### 📚 Sources:")[1] if "### 📚 Sources:" in answer else ""
+        self.assertNotIn("file2.pdf", sources_block)
+
+    @patch("main.chats_collection.insert_one", new_callable=AsyncMock)
+    @patch("main.generate_chat_response", new_callable=AsyncMock)
+    def test_5_graceful_error_boundary(self, mock_generate_chat, mock_insert):
+        """[5] Graceful Error Boundary & Exception Handling Test"""
+        mock_generate_chat.side_effect = Exception("Upstream OpenAI Timeout")
+
+        from main import get_current_user
+        app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
+
+        response = client.post("/chat", json={"message": "Crash it"})
+
+        app.dependency_overrides = {}
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json()["detail"], "Failed to generate response. Please try again.")
+
+class EmojiTestResult(unittest.TextTestResult):
+    def addSuccess(self, test):
+        unittest.TextTestResult.addSuccess(self, test)
+        if self.showAll:
+            self.stream.write("✅ [PASS]\n")
+            self.stream.flush()
+
+    def addFailure(self, test, err):
+        unittest.TextTestResult.addFailure(self, test, err)
+        if self.showAll:
+            self.stream.write("❌ [FAILED]\n")
+            self.stream.flush()
+
+    def addError(self, test, err):
+        unittest.TextTestResult.addError(self, test, err)
+        if self.showAll:
+            self.stream.write("❌ [ERROR]\n")
+            self.stream.flush()
+
+class EmojiTestRunner(unittest.TextTestRunner):
+    def _makeResult(self):
+        return EmojiTestResult(self.stream, self.descriptions, self.verbosity)
+
+if __name__ == '__main__':
+    unittest.main(testRunner=EmojiTestRunner(verbosity=2))

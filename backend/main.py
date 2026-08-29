@@ -7,7 +7,7 @@ import uvicorn
 import uuid
 from pydantic import BaseModel, EmailStr
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
@@ -25,7 +25,7 @@ GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[os.getenv("FRONTEND_URL", "http://localhost:5173")],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -250,7 +250,7 @@ async def chat(request: ChatRequest, current_user: dict = Depends(get_current_us
                 "chat_id": chat_id,
                 "user_email": current_user["email"],
                 "title": "New Conversation",
-                "created_at": datetime.utcnow(),
+                "created_at": datetime.now(timezone.utc),
                 "messages": []
             }
             await chats_collection.insert_one(chat_doc)

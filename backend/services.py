@@ -14,7 +14,7 @@ client = genai.Client(api_key=GEMINI_API_KEY)
 
 gorouter_client = OpenAI(
     api_key=os.getenv("GOROUTER_API_KEY"),
-    base_url="https://gorouter.app/v1/",
+    base_url="https://api.justwoker.icu/v1",
 )
 
 def extract_text_from_pdf(pdf_bytes: bytes) -> list[dict]:
@@ -83,10 +83,23 @@ async def generate_chat_response(query: str, user_email: str) -> str:
         )
         query_embedding = query_response.embeddings[0].values
 
-        # Query database for all unique filenames belonging to the user
-        all_docs_cursor = collection.find({"user_email": user_email}, {"filename": 1, "_id": 0})
-        all_docs = await all_docs_cursor.to_list(length=None)
-        all_filenames = list(set(doc.get("filename") for doc in all_docs if doc.get("filename")))
+        # Query database for all unique filenames belonging to the user efficiently
+        all_filenames = await collection.distinct("filename", {"user_email": user_email})
+        
+        # Filename Intent Detection
+        query_lower = query.lower()
+        target_filename = None
+        for fname in all_filenames:
+            if fname.lower() in query_lower:
+                target_filename = fname
+                break
+
+        # Dynamic Vector Search Filtering
+        vector_filter = {
+            "user_email": {"$eq": user_email}
+        }
+        if target_filename:
+            vector_filter["filename"] = {"$eq": target_filename}
 
         # MongoDB Atlas Vector Search Pipeline with strict multi-tenant isolation
         pipeline = [
@@ -97,9 +110,7 @@ async def generate_chat_response(query: str, user_email: str) -> str:
                     "queryVector": query_embedding,
                     "numCandidates": 50,
                     "limit": 5,
-                    "filter": {
-                        "user_email": {"$eq": user_email}
-                    }
+                    "filter": vector_filter
                 }
             },
             {
@@ -116,15 +127,10 @@ async def generate_chat_response(query: str, user_email: str) -> str:
         results = await cursor.to_list(length=5)
 
         context_parts = []
-        citations = []
         for res in results:
             filename = res.get('filename', 'Unknown File')
-            page = res.get('page', '?')
+            page = res.get('page', 1)
             context_parts.append(f"Source: {filename} (Page {page})\nContext: {res.get('text')}")
-            # Format unique citations for the markdown block
-            citation_str = f"- **{filename}** (Page {page})"
-            if citation_str not in citations:
-                citations.append(citation_str)
 
         context = "\n\n".join(context_parts)
 
@@ -150,13 +156,23 @@ Question:
             ],
             temperature=0.2,
         )
-        
+
         answer = response.choices[0].message.content.strip()
-        
-        # Atomically bundle answer and formatted citations
+
+        # Atomically bundle answer and formatted citations using smart precision filtering
+        citations = []
+        for i, res in enumerate(results):
+            filename = res.get('filename', 'Unknown File')
+            page = res.get('page', 1)
+            # Append if it's the top result OR if the LLM actually utilized the source
+            if i == 0 or filename in answer:
+                citation_str = f"- **{filename}** (Page {page})"
+                if citation_str not in citations:
+                    citations.append(citation_str)
+
         if citations:
             answer += "\n\n### 📚 Sources:\n" + "\n".join(citations)
-            
+
         return answer
 
     except Exception as e:
