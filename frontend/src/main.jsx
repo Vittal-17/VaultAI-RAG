@@ -8,17 +8,36 @@ import { GoogleOAuthProvider } from '@react-oauth/google'
 axios.defaults.withCredentials = true;
 axios.defaults.baseURL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
 
-axios.get('/api/csrf').catch(() => {});
+let csrfToken = null;
+let csrfPromise = null;
 
-axios.interceptors.request.use((config) => {
+const fetchCsrfToken = () => {
+  if (!csrfPromise) {
+    csrfPromise = axios.get('/api/csrf').then(response => {
+      if (response.data && response.data.csrf_token) {
+        csrfToken = response.data.csrf_token;
+      }
+      return csrfToken;
+    }).catch(() => {
+      csrfPromise = null;
+    });
+  }
+  return csrfPromise;
+};
+
+fetchCsrfToken();
+
+axios.interceptors.request.use(async (config) => {
+  // Prevent infinite loop when fetching csrf token itself
+  if (config.url === '/api/csrf') {
+    return config;
+  }
+
   const methods = ['post', 'put', 'patch', 'delete'];
   if (methods.includes(config.method?.toLowerCase())) {
-    const getCookie = (name) => {
-      const value = `; ${document.cookie}`;
-      const parts = value.split(`; ${name}=`);
-      if (parts.length === 2) return parts.pop().split(';').shift();
-    };
-    const csrfToken = getCookie('csrf_token');
+    if (!csrfToken) {
+      await fetchCsrfToken();
+    }
     if (csrfToken) {
       config.headers['X-CSRF-Token'] = csrfToken;
     }

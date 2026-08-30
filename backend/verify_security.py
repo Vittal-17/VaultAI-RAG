@@ -144,6 +144,8 @@ class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         """1. GET request without CSRF token"""
         response = client.get('/api/csrf')
         self.assertEqual(response.status_code, 200)
+        self.assertIn("csrf_token", response.json())
+        self.assertTrue(len(response.json()["csrf_token"]) > 32)
 
     def test_7_csrf_post_without_token(self):
         """2. POST without CSRF token"""
@@ -470,6 +472,184 @@ class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 500)
         self.assertIn("Failed to generate response. Please try again.", response.json()["detail"])
         self.assertNotIn("SECRET_DB_CONNECTION_STRING_ERROR", response.text)
+
+    def test_29_cors_preflight(self):
+        # 1. REAL CORS PRE-FLIGHT TEST
+        headers = {'Origin': 'http://localhost:5173', 'Access-Control-Request-Method': 'POST'}
+        response = client.options('/api/login', headers=headers)
+        self.assertEqual(response.headers.get('Access-Control-Allow-Origin'), 'http://localhost:5173')
+        self.assertEqual(response.headers.get('Access-Control-Allow-Credentials'), 'true')
+        
+        # Verify unexpected origin does NOT get configured allowed-origin
+        headers = {'Origin': 'http://attacker.com', 'Access-Control-Request-Method': 'POST'}
+        response = client.options('/api/login', headers=headers)
+        self.assertNotEqual(response.headers.get('Access-Control-Allow-Origin'), 'http://localhost:5173')
+
+    @patch('main.users_collection.find_one', new_callable=unittest.mock.AsyncMock)
+    @patch('main.users_collection.insert_one', new_callable=unittest.mock.AsyncMock)
+    def test_30_actual_auth_cookie_creation(self, mock_insert, mock_find):
+        # 2. TEST ACTUAL AUTH COOKIE CREATION
+        mock_find.return_value = None
+        import main
+        
+        main.IS_PRODUCTION = False
+        main.COOKIE_SAMESITE = 'lax'
+        
+        client.cookies.clear()
+        res_csrf = client.get('/api/csrf')
+        token = res_csrf.json()['csrf_token']
+        
+        response = client.post('/api/register', json={"fullname": "test", "email": "new@test.com", "password": "123"}, cookies={'csrf_token': token}, headers={'X-CSRF-Token': token, 'Origin': 'http://localhost:5173'})
+        set_cookies = response.headers.get_list('set-cookie')
+        access_cookie = next(c for c in set_cookies if c.startswith('access_token='))
+        
+        self.assertIn('HttpOnly', access_cookie)
+        self.assertIn('Path=/', access_cookie)
+        self.assertIn('Max-Age=604800', access_cookie)
+        self.assertIn('samesite=lax', access_cookie.lower())
+        self.assertNotIn('Secure', access_cookie)
+        
+        main.IS_PRODUCTION = True
+        main.COOKIE_SAMESITE = 'none'
+        main.limiter._storage.reset()
+        mock_find.return_value = None
+        
+        client.cookies.clear()
+        res_csrf = client.get('/api/csrf')
+        token = res_csrf.json()['csrf_token']
+        
+        response = client.post('/api/register', json={"fullname": "test", "email": "new2@test.com", "password": "123"}, cookies={'csrf_token': token}, headers={'X-CSRF-Token': token, 'Origin': 'http://localhost:5173'})
+        set_cookies = response.headers.get_list('set-cookie')
+        access_cookie = next(c for c in set_cookies if c.startswith('access_token='))
+        self.assertIn('samesite=none', access_cookie.lower())
+        self.assertIn('Secure', access_cookie)
+        
+        main.IS_PRODUCTION = False
+        main.COOKIE_SAMESITE = 'lax'
+
+    def test_31_csrf_cookie_creation(self):
+        # 3. TEST CSRF COOKIE CREATION
+        import main
+        main.IS_PRODUCTION = False
+        main.COOKIE_SAMESITE = 'lax'
+        
+        client.cookies.clear()
+        response = client.get('/api/csrf')
+        self.assertEqual(response.status_code, 200)
+        
+        json_token = response.json().get('csrf_token')
+        self.assertTrue(len(json_token) >= 32)
+        
+        set_cookies = response.headers.get_list('set-cookie')
+        csrf_cookie_str = next((c for c in set_cookies if c.startswith('csrf_token=')), None)
+        self.assertIsNotNone(csrf_cookie_str)
+        
+        cookie_val = csrf_cookie_str.split(';')[0].split('=')[1]
+        self.assertEqual(json_token, cookie_val)
+        
+        self.assertIn('Path=/', csrf_cookie_str)
+        self.assertNotIn('HttpOnly', csrf_cookie_str)
+        self.assertNotIn('Secure', csrf_cookie_str)
+        self.assertIn('samesite=lax', csrf_cookie_str.lower())
+        
+        main.IS_PRODUCTION = True
+        main.COOKIE_SAMESITE = 'none'
+        
+        client.cookies.clear()
+        response = client.get('/api/csrf')
+        set_cookies = response.headers.get_list('set-cookie')
+        csrf_cookie_str = next(c for c in set_cookies if c.startswith('csrf_token='))
+        self.assertIn('Secure', csrf_cookie_str)
+        self.assertIn('samesite=none', csrf_cookie_str.lower())
+        
+        main.IS_PRODUCTION = False
+        main.COOKIE_SAMESITE = 'lax'
+
+    def test_32_invalid_cookie_samesite(self):
+        # 4. INVALID COOKIE_SAMESITE TEST
+        import subprocess
+        import sys
+        
+        script = """
+import os
+os.environ['COOKIE_SAMESITE'] = 'banana'
+import main
+"""
+        result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, cwd='backend')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("COOKIE_SAMESITE must be 'lax', 'strict', or 'none'", result.stderr)
+        
+        script2 = """
+import os
+os.environ['COOKIE_SAMESITE'] = 'none'
+os.environ['ENVIRONMENT'] = 'development'
+import main
+print(main.COOKIE_SAMESITE)
+"""
+        result2 = subprocess.run([sys.executable, '-c', script2], capture_output=True, text=True, cwd='backend')
+        self.assertEqual(result2.returncode, 0)
+        self.assertEqual(result2.stdout.strip(), 'lax')
+        
+        script3 = """
+import os
+os.environ['COOKIE_SAMESITE'] = 'none'
+os.environ['ENVIRONMENT'] = 'production'
+import main
+print(main.COOKIE_SAMESITE)
+print(main.IS_PRODUCTION)
+"""
+        result3 = subprocess.run([sys.executable, '-c', script3], capture_output=True, text=True, cwd='backend')
+        self.assertEqual(result3.returncode, 0)
+        self.assertIn('none', result3.stdout)
+        self.assertIn('True', result3.stdout)
+
+    def test_33_logout_cookie_deletion(self):
+        # 5. LOGOUT COOKIE DELETION
+        response = client.post('/api/logout', cookies={'csrf_token': 'rl_token'}, headers={'X-CSRF-Token': 'rl_token', 'Origin': 'http://localhost:5173'})
+        set_cookies = response.headers.get_list('set-cookie')
+        
+        access_deleted = next((c for c in set_cookies if c.startswith('access_token=')), None)
+        
+        self.assertIsNotNone(access_deleted)
+        self.assertIn('""', access_deleted)
+        self.assertIn('Path=/', access_deleted)
+        
+        self.assertFalse(any('csrftoken=' in c for c in set_cookies))
+
+    def test_34_security_headers(self):
+        # 6. SECURITY HEADERS
+        import main
+        main.IS_PRODUCTION = False
+        response = client.get('/api/csrf')
+        self.assertEqual(response.headers.get('X-Content-Type-Options'), 'nosniff')
+        self.assertEqual(response.headers.get('X-Frame-Options'), 'DENY')
+        self.assertEqual(response.headers.get('Referrer-Policy'), 'strict-origin-when-cross-origin')
+        self.assertNotIn('Strict-Transport-Security', response.headers)
+        
+        main.IS_PRODUCTION = True
+        response = client.get('/api/csrf')
+        self.assertEqual(response.headers.get('X-Content-Type-Options'), 'nosniff')
+        self.assertEqual(response.headers.get('X-Frame-Options'), 'DENY')
+        self.assertEqual(response.headers.get('Referrer-Policy'), 'strict-origin-when-cross-origin')
+        self.assertIn('Strict-Transport-Security', response.headers)
+        self.assertEqual(response.headers.get('Strict-Transport-Security'), 'max-age=31536000; includeSubDomains')
+        
+        main.IS_PRODUCTION = False
+
+    def test_35_csrf_flow(self):
+        # 7. CSRF FLOW
+        client.cookies.clear()
+        response1 = client.get('/api/csrf')
+        json_token = response1.json().get('csrf_token')
+        
+        set_cookies = response1.headers.get_list('set-cookie')
+        csrf_cookie_str = next(c for c in set_cookies if c.startswith('csrf_token='))
+        cookie_token = csrf_cookie_str.split(';')[0].split('=')[1]
+        
+        self.assertEqual(json_token, cookie_token)
+        
+        response2 = client.post('/api/logout', cookies={'csrf_token': cookie_token}, headers={'X-CSRF-Token': cookie_token, 'Origin': 'http://localhost:5173'})
+        self.assertEqual(response2.status_code, 200)
 
 class EmojiTestResult(unittest.TextTestResult):
     def addSuccess(self, test):

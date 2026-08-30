@@ -100,6 +100,14 @@ async def global_exception_handler(request: Request, exc: Exception):
 IS_PRODUCTION = os.getenv("ENVIRONMENT") == "production"
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 
+COOKIE_SAMESITE = os.getenv("COOKIE_SAMESITE", "lax").lower()
+if COOKIE_SAMESITE not in ["lax", "strict", "none"]:
+    raise ValueError("COOKIE_SAMESITE must be 'lax', 'strict', or 'none'")
+if COOKIE_SAMESITE == "none" and not IS_PRODUCTION:
+    COOKIE_SAMESITE = "lax"
+
+ALLOWED_ORIGIN = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip('/')
+
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 import secrets
@@ -112,34 +120,65 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             
         if request.method in ["POST", "PUT", "PATCH", "DELETE"]:
             origin = request.headers.get("origin")
-            allowed_origin = os.getenv("FRONTEND_URL", "http://localhost:5173")
-            if origin and origin != allowed_origin:
+            origin = origin.rstrip('/') if origin else origin
+            if origin and origin != ALLOWED_ORIGIN:
+                logger.warning("CSRF validation failed: invalid origin")
                 return JSONResponse(status_code=403, content={"detail": "CSRF validation failed."})
                 
             csrf_cookie = request.cookies.get("csrf_token")
             csrf_header = request.headers.get("x-csrf-token")
             
-            if not csrf_cookie or not csrf_header or not hmac.compare_digest(csrf_cookie, csrf_header):
+            if not csrf_cookie:
+                logger.warning("CSRF validation failed: missing cookie")
+                return JSONResponse(status_code=403, content={"detail": "CSRF validation failed."})
+            if not csrf_header:
+                logger.warning("CSRF validation failed: missing header")
+                return JSONResponse(status_code=403, content={"detail": "CSRF validation failed."})
+            if not hmac.compare_digest(csrf_cookie, csrf_header):
+                logger.warning(
+                    "CSRF validation failed: token length mismatch (cookie=%d, header=%d)",
+                    len(csrf_cookie),
+                    len(csrf_header),
+                )
                 return JSONResponse(status_code=403, content={"detail": "CSRF validation failed."})
                 
+        csrf_token = request.cookies.get("csrf_token")
+        is_new_token = False
+        if not csrf_token:
+            csrf_token = secrets.token_hex(32)
+            is_new_token = True
+            
+        request.state.csrf_token = csrf_token
         response = await call_next(request)
         
-        if "csrf_token" not in request.cookies:
-            token = secrets.token_hex(32)
+        if is_new_token:
             response.set_cookie(
                 key="csrf_token",
-                value=token,
+                value=csrf_token,
                 httponly=False,
-                samesite="lax",
+                samesite=COOKIE_SAMESITE,
                 secure=IS_PRODUCTION,
             )
+            
         return response
 
 app.add_middleware(CSRFMiddleware)
 
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        if IS_PRODUCTION:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+
+app.add_middleware(SecurityHeadersMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("FRONTEND_URL", "http://localhost:5173")],
+    allow_origins=[ALLOWED_ORIGIN],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -165,7 +204,7 @@ class ChatRequest(BaseModel):
 @app.get("/api/csrf")
 @limiter.limit(RATE_LIMIT_GENERAL)
 async def get_csrf(request: Request):
-    return {"message": "CSRF cookie set"}
+    return {"message": "CSRF cookie set", "csrf_token": request.state.csrf_token}
 
 async def get_current_user(access_token: str | None = Cookie(None)):
     if not access_token:
@@ -206,7 +245,7 @@ async def register(request: Request, body_req: RegisterRequest, response: Respon
         key="access_token",
         value=access_token,
         httponly=True,
-        samesite="lax",
+        samesite=COOKIE_SAMESITE,
         secure=IS_PRODUCTION,
         max_age=7 * 24 * 60 * 60
     )
@@ -226,7 +265,7 @@ async def login(request: Request, body_req: LoginRequest, response: Response):
         key="access_token",
         value=access_token,
         httponly=True,
-        samesite="lax",
+        samesite=COOKIE_SAMESITE,
         secure=IS_PRODUCTION,
         max_age=7 * 24 * 60 * 60
     )
@@ -257,7 +296,7 @@ async def google_auth(request: Request, body_req: GoogleAuthRequest, response: R
             key="access_token",
             value=access_token,
             httponly=True,
-            samesite="lax",
+            samesite=COOKIE_SAMESITE,
             secure=IS_PRODUCTION,
             max_age=7 * 24 * 60 * 60
         )
@@ -269,13 +308,10 @@ async def google_auth(request: Request, body_req: GoogleAuthRequest, response: R
 @app.post("/api/logout")
 @limiter.limit(RATE_LIMIT_GENERAL)
 async def logout(request: Request, response: Response):
-  response.delete_cookie(
-      "access_token", httponly=True, samesite="lax", secure=IS_PRODUCTION
-  )
-  response.delete_cookie(
-      "csrftoken", samesite="lax", secure=IS_PRODUCTION
-  )  # Clear CSRF too
-  return {"message": "Logged out successfully"}
+    response.delete_cookie(
+        "access_token", httponly=True, samesite=COOKIE_SAMESITE, secure=IS_PRODUCTION
+    )
+    return {"message": "Logged out successfully"}
 
 @app.get("/api/me")
 @limiter.limit(RATE_LIMIT_GENERAL)
