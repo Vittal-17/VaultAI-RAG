@@ -241,20 +241,34 @@ async def get_chat(chat_id: str, current_user: dict = Depends(get_current_user))
         raise HTTPException(status_code=404, detail="Chat not found")
     return chat
 
+MAX_PDF_SIZE_MB = int(os.getenv("MAX_PDF_SIZE_MB", 25))
+MAX_PDF_SIZE_BYTES = MAX_PDF_SIZE_MB * 1024 * 1024
+
 @app.post("/upload")
 async def upload_document(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+        
+    contents = bytearray()
+    while chunk := await file.read(1024 * 1024):
+        contents.extend(chunk)
+        if len(contents) > MAX_PDF_SIZE_BYTES:
+            raise HTTPException(status_code=413, detail=f"PDF is too large. Maximum size is {MAX_PDF_SIZE_MB} MB.")
 
     try:
-        contents = await file.read()
-        await process_and_store_document(file.filename, contents, current_user["email"])
+        await process_and_store_document(file.filename, bytes(contents), current_user["email"])
         return {"message": f"Successfully processed and stored {file.filename}"}
     except ValueError as ve:
-        raise HTTPException(status_code=400, detail=str(ve))
+        error_msg = str(ve)
+        if "too many" in error_msg.lower():
+            raise HTTPException(status_code=413, detail=error_msg)
+        raise HTTPException(status_code=400, detail=error_msg)
     except Exception as e:
         print(f"CRITICAL ERROR in upload_document: {str(e)}")
-        raise HTTPException(status_code=500, detail="An internal server error occurred while processing the document.")
+        # Only pass through our own controlled Exception messages, otherwise generic 500
+        safe_messages = ["Failed to generate embeddings. Upload aborted.", "Database insertion failed. Upload aborted."]
+        detail = str(e) if str(e) in safe_messages else "An internal server error occurred while processing the document."
+        raise HTTPException(status_code=500, detail=detail)
 
 class TitleRequest(BaseModel):
     title: str

@@ -17,14 +17,28 @@ gorouter_client = OpenAI(
     base_url="https://api.justwoker.icu/v1",
 )
 
+MAX_PDF_PAGES = int(os.getenv("MAX_PDF_PAGES", 200))
+MAX_CHUNKS_PER_DOCUMENT = int(os.getenv("MAX_CHUNKS_PER_DOCUMENT", 5000))
+
 def extract_text_from_pdf(pdf_bytes: bytes) -> list[dict]:
     """Extracts text from a PDF file page by page, preserving metadata."""
-    reader = PdfReader(io.BytesIO(pdf_bytes))
+    try:
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+    except Exception:
+        raise ValueError("Invalid or corrupted PDF file.")
+        
+    if len(reader.pages) > MAX_PDF_PAGES:
+        raise ValueError(f"PDF has too many pages. Maximum is {MAX_PDF_PAGES}.")
+        
     pages_data = []
     for i, page in enumerate(reader.pages):
         page_text = page.extract_text()
         if page_text and page_text.strip():
             pages_data.append({"page": i + 1, "text": page_text})
+    
+    if not pages_data:
+        raise ValueError("PDF contains no extractable text.")
+        
     return pages_data
 
 def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> list[str]:
@@ -40,35 +54,50 @@ def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> list[st
 async def process_and_store_document(filename: str, pdf_bytes: bytes, user_email: str):
     """Extracts text, chunks it, generates embeddings, and stores in MongoDB."""
     pages_data = extract_text_from_pdf(pdf_bytes)
-    if not pages_data:
-        raise ValueError("Could not extract text from PDF.")
-
+    
+    all_chunks_info = []
     for page_info in pages_data:
         chunks = chunk_text(page_info["text"])
         for i, chunk in enumerate(chunks):
-            try:
-                # Generate embedding using text-embedding-004 via the gemini client
-                response = client.models.embed_content(
-                    model='gemini-embedding-001',
-                    contents=chunk,
-                    config=types.EmbedContentConfig(
-                        output_dimensionality=768
-                    ),
-                )
-                embedding = response.embeddings[0].values
-
-                doc = {
-                    "filename": filename,
-                    "page": page_info["page"],
-                    "chunk_index": i,
-                    "text": chunk,
-                    "embedding": embedding,
-                    "user_email": user_email
-                }
-                await collection.insert_one(doc)
-            except Exception as e:
-                print(f"Error processing chunk {i} of page {page_info['page']} from {filename}: {e}")
-                raise e
+            all_chunks_info.append({
+                "page": page_info["page"],
+                "chunk_index": i,
+                "text": chunk
+            })
+            
+    if len(all_chunks_info) > MAX_CHUNKS_PER_DOCUMENT:
+        raise ValueError(f"PDF produces too many text chunks. Maximum is {MAX_CHUNKS_PER_DOCUMENT}.")
+        
+    docs_to_insert = []
+    for chunk_info in all_chunks_info:
+        try:
+            response = client.models.embed_content(
+                model='gemini-embedding-001',
+                contents=chunk_info["text"],
+                config=types.EmbedContentConfig(
+                    output_dimensionality=768
+                ),
+            )
+            embedding = response.embeddings[0].values
+            
+            docs_to_insert.append({
+                "filename": filename,
+                "page": chunk_info["page"],
+                "chunk_index": chunk_info["chunk_index"],
+                "text": chunk_info["text"],
+                "embedding": embedding,
+                "user_email": user_email
+            })
+        except Exception as e:
+            print(f"Error processing chunk from {filename}: {e}")
+            raise Exception("Failed to generate embeddings. Upload aborted.")
+            
+    if docs_to_insert:
+        try:
+            await collection.insert_many(docs_to_insert)
+        except Exception as e:
+            print(f"MongoDB insertion failed for {filename}: {e}")
+            raise Exception("Database insertion failed. Upload aborted.")
 
 async def generate_chat_response(query: str, user_email: str) -> str:
     """Searches MongoDB for relevant chunks, isolates tenant data, and formats a sourced response."""

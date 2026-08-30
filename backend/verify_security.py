@@ -193,6 +193,153 @@ class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         response = client.options('/api/logout', headers={'Origin': 'http://localhost:5173', 'Access-Control-Request-Method': 'POST'})
         self.assertEqual(response.status_code, 200)
 
+    @patch('main.process_and_store_document', new_callable=AsyncMock)
+    def test_16_upload_oversized_pdf(self, mock_process):
+        """Oversized PDF"""
+        from main import get_current_user
+        app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
+        
+        # Create a file just over 25MB but mock the read
+        # Wait, if we send real 25MB it's slow. We can patch MAX_PDF_SIZE_BYTES
+        import main
+        orig_max = main.MAX_PDF_SIZE_BYTES
+        main.MAX_PDF_SIZE_BYTES = 100 # 100 bytes limit
+        
+        response = client.post('/upload', files={'file': ('test.pdf', b'A'*150, 'application/pdf')}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
+        
+        main.MAX_PDF_SIZE_BYTES = orig_max
+        app.dependency_overrides = {}
+        
+        self.assertEqual(response.status_code, 413)
+        self.assertIn("too large", response.json()["detail"])
+        mock_process.assert_not_called()
+
+    def test_17_upload_fake_pdf(self):
+        """Fake .pdf file extension check"""
+        from main import get_current_user
+        app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
+        
+        response = client.post('/upload', files={'file': ('test.txt', b'abc', 'text/plain')}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
+        app.dependency_overrides = {}
+        
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Only PDF files", response.json()["detail"])
+
+    @patch('services.PdfReader')
+    def test_18_upload_corrupted_pdf(self, mock_pdfreader):
+        """Corrupted PDF"""
+        from main import get_current_user
+        app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
+        mock_pdfreader.side_effect = Exception("corrupt")
+        
+        response = client.post('/upload', files={'file': ('test.pdf', b'bad', 'application/pdf')}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
+        app.dependency_overrides = {}
+        
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Invalid or corrupted", response.json()["detail"])
+
+    @patch('services.PdfReader')
+    def test_19_upload_too_many_pages(self, mock_pdfreader):
+        """PDF exceeding page limit"""
+        from main import get_current_user
+        app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
+        
+        mock_reader_instance = MagicMock()
+        mock_reader_instance.pages = [MagicMock()] * 201
+        mock_pdfreader.return_value = mock_reader_instance
+        
+        response = client.post('/upload', files={'file': ('test.pdf', b'bad', 'application/pdf')}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
+        app.dependency_overrides = {}
+        
+        self.assertEqual(response.status_code, 413)
+        self.assertIn("too many pages", response.json()["detail"])
+
+    @patch('services.PdfReader')
+    def test_20_upload_empty_pdf(self, mock_pdfreader):
+        """Empty PDF / No extractable text"""
+        from main import get_current_user
+        app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
+        
+        mock_reader_instance = MagicMock()
+        mock_page = MagicMock()
+        mock_page.extract_text.return_value = "   "
+        mock_reader_instance.pages = [mock_page]
+        mock_pdfreader.return_value = mock_reader_instance
+        
+        response = client.post('/upload', files={'file': ('test.pdf', b'bad', 'application/pdf')}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
+        app.dependency_overrides = {}
+        
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("no extractable text", response.json()["detail"])
+
+    @patch('services.PdfReader')
+    def test_21_upload_chunk_explosion(self, mock_pdfreader):
+        """Document exceeding chunk limit"""
+        from main import get_current_user
+        app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
+        
+        mock_reader_instance = MagicMock()
+        mock_page = MagicMock()
+        # Generates a massive string to trigger thousands of chunks
+        mock_page.extract_text.return_value = "A" * 5000000 
+        mock_reader_instance.pages = [mock_page]
+        mock_pdfreader.return_value = mock_reader_instance
+        
+        response = client.post('/upload', files={'file': ('test.pdf', b'bad', 'application/pdf')}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
+        app.dependency_overrides = {}
+        
+        self.assertEqual(response.status_code, 413)
+        self.assertIn("too many text chunks", response.json()["detail"])
+        
+    @patch('services.PdfReader')
+    @patch('services.client.models.embed_content')
+    def test_22_upload_embedding_failure(self, mock_embed, mock_pdfreader):
+        """Embedding failure"""
+        from main import get_current_user
+        app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
+        
+        mock_reader_instance = MagicMock()
+        mock_page = MagicMock()
+        mock_page.extract_text.return_value = "Valid text"
+        mock_reader_instance.pages = [mock_page]
+        mock_pdfreader.return_value = mock_reader_instance
+        
+        mock_embed.side_effect = Exception("API Timeout")
+        
+        response = client.post('/upload', files={'file': ('test.pdf', b'bad', 'application/pdf')}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
+        app.dependency_overrides = {}
+        
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("Failed to generate embeddings", response.json()["detail"])
+        self.assertNotIn("Timeout", response.json()["detail"])
+        
+    @patch('services.PdfReader')
+    @patch('services.client.models.embed_content')
+    @patch('services.collection.insert_many', new_callable=AsyncMock)
+    def test_23_upload_mongodb_failure(self, mock_insert, mock_embed, mock_pdfreader):
+        """MongoDB insertion failure"""
+        from main import get_current_user
+        app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
+        
+        mock_reader_instance = MagicMock()
+        mock_page = MagicMock()
+        mock_page.extract_text.return_value = "Valid text"
+        mock_reader_instance.pages = [mock_page]
+        mock_pdfreader.return_value = mock_reader_instance
+        
+        mock_embed_response = MagicMock()
+        mock_embed_response.embeddings = [MagicMock(values=[0.1]*768)]
+        mock_embed.return_value = mock_embed_response
+        
+        mock_insert.side_effect = Exception("DB Down")
+        
+        response = client.post('/upload', files={'file': ('test.pdf', b'bad', 'application/pdf')}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
+        app.dependency_overrides = {}
+        
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("Database insertion failed", response.json()["detail"])
+        self.assertNotIn("DB Down", response.json()["detail"])
+
 class EmojiTestResult(unittest.TextTestResult):
     def addSuccess(self, test):
         unittest.TextTestResult.addSuccess(self, test)
