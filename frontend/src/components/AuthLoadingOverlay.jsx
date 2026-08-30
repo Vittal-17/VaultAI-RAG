@@ -1,11 +1,11 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 
 const messages = [
   "Authenticating credentials...",
   "Establishing secure enclave...",
   "Decrypting session tokens...",
-  "Entering VaultAI Workspace..."
+  "Entering CYPHR Workspace..."
 ];
 
 const AuthLoadingOverlay = ({ isVisible }) => {

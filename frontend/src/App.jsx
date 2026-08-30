@@ -115,7 +115,7 @@ function App() {
             >
               {sidebarOpen ? <PanelLeftClose className="w-5 h-5" /> : <PanelLeft className="w-5 h-5" />}
             </button>
-            <span className="ml-4 font-bold text-[#0e3b43]">{sidebarOpen ? '' : 'VaultAI'}</span>
+            <span className="ml-4 font-bold text-[#0e3b43]">{sidebarOpen ? '' : 'CYPHR'}</span>
           </div>
 
           <div className="flex-1 flex flex-col pt-14 min-h-0">

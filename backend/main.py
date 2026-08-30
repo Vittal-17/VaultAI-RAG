@@ -57,11 +57,11 @@ def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded) -> Respo
         msg = "Too many chat requests. Please try again later."
     else:
         msg = "Too many requests. Please try again later."
-        
+
     response = JSONResponse(
         {"detail": msg}, status_code=429
     )
-    
+
     current_limit = getattr(request.state, "view_rate_limit", None)
     if current_limit:
         import time
@@ -73,7 +73,7 @@ def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded) -> Respo
             response.headers["Retry-After"] = str(retry_after)
         except Exception:
             pass
-            
+
     response = request.app.state.limiter._inject_headers(
         response, getattr(request.state, "view_rate_limit", None)
     )
@@ -84,7 +84,7 @@ async def lifespan(app: FastAPI):
     await check_db_connection()
     yield
 
-app = FastAPI(title="VaultAI Backend", lifespan=lifespan)
+app = FastAPI(title="CYPHR Backend", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, custom_rate_limit_handler)
 
@@ -117,17 +117,17 @@ class CSRFMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         if request.method == "OPTIONS":
             return await call_next(request)
-            
+
         if request.method in ["POST", "PUT", "PATCH", "DELETE"]:
             origin = request.headers.get("origin")
             origin = origin.rstrip('/') if origin else origin
             if origin and origin != ALLOWED_ORIGIN:
                 logger.warning("CSRF validation failed: invalid origin")
                 return JSONResponse(status_code=403, content={"detail": "CSRF validation failed."})
-                
+
             csrf_cookie = request.cookies.get("csrf_token")
             csrf_header = request.headers.get("x-csrf-token")
-            
+
             if not csrf_cookie:
                 logger.warning("CSRF validation failed: missing cookie")
                 return JSONResponse(status_code=403, content={"detail": "CSRF validation failed."})
@@ -141,16 +141,16 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                     len(csrf_header),
                 )
                 return JSONResponse(status_code=403, content={"detail": "CSRF validation failed."})
-                
+
         csrf_token = request.cookies.get("csrf_token")
         is_new_token = False
         if not csrf_token:
             csrf_token = secrets.token_hex(32)
             is_new_token = True
-            
+
         request.state.csrf_token = csrf_token
         response = await call_next(request)
-        
+
         if is_new_token:
             response.set_cookie(
                 key="csrf_token",
@@ -159,7 +159,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                 samesite=COOKIE_SAMESITE,
                 secure=IS_PRODUCTION,
             )
-            
+
         return response
 
 app.add_middleware(CSRFMiddleware)
@@ -241,13 +241,14 @@ async def register(request: Request, body_req: RegisterRequest, response: Respon
     await users_collection.insert_one(user_doc)
 
     access_token = create_access_token(data={"sub": request.email})
+    from auth import ACCESS_TOKEN_EXPIRE_MINUTES
     response.set_cookie(
         key="access_token",
         value=access_token,
         httponly=True,
         samesite=COOKIE_SAMESITE,
         secure=IS_PRODUCTION,
-        max_age=7 * 24 * 60 * 60
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60
     )
     return {"message": "User registered successfully", "user": {"email": request.email, "fullname": request.fullname}}
 
@@ -257,17 +258,24 @@ async def login(request: Request, body_req: LoginRequest, response: Response):
     request_obj = request
     request = body_req
     user = await users_collection.find_one({"email": request.email})
-    if not user or not verify_password(request.password, user["hashed_password"]):
+    if user and user.get("hashed_password"):
+        is_valid = verify_password(request.password, user["hashed_password"])
+    else:
+        dummy_hash = "$2b$12$Ad.JhLIiX8Dtu/AtpaiCWuGzdVRHNgX/Rs8tH5m7nTXfA8VZ74LJC"
+        verify_password(request.password, dummy_hash)
+        is_valid = False
+    if not is_valid:
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     access_token = create_access_token(data={"sub": request.email})
+    from auth import ACCESS_TOKEN_EXPIRE_MINUTES
     response.set_cookie(
         key="access_token",
         value=access_token,
         httponly=True,
         samesite=COOKIE_SAMESITE,
         secure=IS_PRODUCTION,
-        max_age=7 * 24 * 60 * 60
+        max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60
     )
     return {"message": "Login successful", "user": {"email": user["email"], "fullname": user["fullname"]}}
 
@@ -278,6 +286,9 @@ async def google_auth(request: Request, body_req: GoogleAuthRequest, response: R
     request = body_req
     try:
         idinfo = id_token.verify_oauth2_token(request.credential, google_requests.Request(), GOOGLE_CLIENT_ID,clock_skew_in_seconds=60,)
+        if idinfo.get("email_verified") != True:
+            logger.warning("GOOGLE VERIFY ERROR: Unverified email")
+            raise HTTPException(status_code=401, detail="Invalid Google token")
         email = idinfo['email']
         name = idinfo.get('name', 'Google User')
 
@@ -292,13 +303,14 @@ async def google_auth(request: Request, body_req: GoogleAuthRequest, response: R
             await users_collection.insert_one(user_doc)
 
         access_token = create_access_token(data={"sub": email})
+        from auth import ACCESS_TOKEN_EXPIRE_MINUTES
         response.set_cookie(
             key="access_token",
             value=access_token,
             httponly=True,
             samesite=COOKIE_SAMESITE,
             secure=IS_PRODUCTION,
-            max_age=7 * 24 * 60 * 60
+            max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60
         )
         return {"message": "Login successful", "user": {"email": email, "fullname": name}}
     except ValueError as e:
@@ -381,7 +393,7 @@ MAX_PDF_SIZE_BYTES = MAX_PDF_SIZE_MB * 1024 * 1024
 async def upload_document(request: Request, file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
-        
+
     contents = bytearray()
     while chunk := await file.read(1024 * 1024):
         contents.extend(chunk)

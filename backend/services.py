@@ -166,7 +166,7 @@ async def generate_chat_response(query: str, user_email: str) -> str:
 
         context = "\n\n".join(context_parts)
 
-        prompt = f"""You are VaultAI, a precise and highly analytical knowledge assistant.
+        prompt = f"""You are CYPHR, a precise and highly analytical knowledge assistant.
 The user has access to the following files in their Knowledge Base: {all_filenames}
 
 Answer the user's question explicitly relying on the provided context chunks below. 

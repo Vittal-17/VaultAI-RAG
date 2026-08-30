@@ -1,6 +1,6 @@
-# VaultAI - Full Stack RAG Application
+# CYPHR - Full Stack RAG Application
 
-VaultAI is a production-ready Retrieval-Augmented Generation (RAG) application. It features a Python FastAPI backend, MongoDB Atlas for vector storage and search, and a React (Vite + Tailwind) frontend. It utilizes the Google Gemini API for both document embedding and intelligent text generation.
+CYPHR is a production-ready Retrieval-Augmented Generation (RAG) application. It features a Python FastAPI backend, MongoDB Atlas for vector storage and search, and a React (Vite + Tailwind) frontend. It utilizes the Google Gemini API for both document embedding and intelligent text generation.
 
 ## Features
 
@@ -69,4 +69,4 @@ Start the Vite development server:
 npm run dev
 ```
 
-Navigate to `http://localhost:5173` in your browser to start using VaultAI!
+Navigate to `http://localhost:5173` in your browser to start using CYPHR!

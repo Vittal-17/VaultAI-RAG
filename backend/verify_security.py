@@ -12,12 +12,12 @@ from services import generate_chat_response
 
 client = TestClient(app)
 
-class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
-    
+class TestCYPHRSecurityAndRAG(unittest.IsolatedAsyncioTestCase):
+
     def setUp(self):
         import main
         main.limiter._storage.reset()
-        
+
     @patch("services.collection")
     @patch("services.client.models.embed_content")
     @patch("services.gorouter_client.chat.completions.create")
@@ -204,18 +204,18 @@ class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         """Oversized PDF"""
         from main import get_current_user
         app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
-        
+
         # Create a file just over 25MB but mock the read
         # Wait, if we send real 25MB it's slow. We can patch MAX_PDF_SIZE_BYTES
         import main
         orig_max = main.MAX_PDF_SIZE_BYTES
         main.MAX_PDF_SIZE_BYTES = 100 # 100 bytes limit
-        
+
         response = client.post('/upload', files={'file': ('test.pdf', b'A'*150, 'application/pdf')}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
-        
+
         main.MAX_PDF_SIZE_BYTES = orig_max
         app.dependency_overrides = {}
-        
+
         self.assertEqual(response.status_code, 413)
         self.assertIn("too large", response.json()["detail"])
         mock_process.assert_not_called()
@@ -224,10 +224,10 @@ class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         """Fake .pdf file extension check"""
         from main import get_current_user
         app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
-        
+
         response = client.post('/upload', files={'file': ('test.txt', b'abc', 'text/plain')}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
         app.dependency_overrides = {}
-        
+
         self.assertEqual(response.status_code, 400)
         self.assertIn("Only PDF files", response.json()["detail"])
 
@@ -237,10 +237,10 @@ class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         from main import get_current_user
         app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
         mock_pdfreader.side_effect = Exception("corrupt")
-        
+
         response = client.post('/upload', files={'file': ('test.pdf', b'bad', 'application/pdf')}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
         app.dependency_overrides = {}
-        
+
         self.assertEqual(response.status_code, 400)
         self.assertIn("Invalid or corrupted", response.json()["detail"])
 
@@ -249,14 +249,14 @@ class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         """PDF exceeding page limit"""
         from main import get_current_user
         app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
-        
+
         mock_reader_instance = MagicMock()
         mock_reader_instance.pages = [MagicMock()] * 201
         mock_pdfreader.return_value = mock_reader_instance
-        
+
         response = client.post('/upload', files={'file': ('test.pdf', b'bad', 'application/pdf')}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
         app.dependency_overrides = {}
-        
+
         self.assertEqual(response.status_code, 413)
         self.assertIn("too many pages", response.json()["detail"])
 
@@ -265,16 +265,16 @@ class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         """Empty PDF / No extractable text"""
         from main import get_current_user
         app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
-        
+
         mock_reader_instance = MagicMock()
         mock_page = MagicMock()
         mock_page.extract_text.return_value = "   "
         mock_reader_instance.pages = [mock_page]
         mock_pdfreader.return_value = mock_reader_instance
-        
+
         response = client.post('/upload', files={'file': ('test.pdf', b'bad', 'application/pdf')}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
         app.dependency_overrides = {}
-        
+
         self.assertEqual(response.status_code, 400)
         self.assertIn("no extractable text", response.json()["detail"])
 
@@ -283,42 +283,42 @@ class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         """Document exceeding chunk limit"""
         from main import get_current_user
         app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
-        
+
         mock_reader_instance = MagicMock()
         mock_page = MagicMock()
         # Generates a massive string to trigger thousands of chunks
-        mock_page.extract_text.return_value = "A" * 5000000 
+        mock_page.extract_text.return_value = "A" * 5000000
         mock_reader_instance.pages = [mock_page]
         mock_pdfreader.return_value = mock_reader_instance
-        
+
         response = client.post('/upload', files={'file': ('test.pdf', b'bad', 'application/pdf')}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
         app.dependency_overrides = {}
-        
+
         self.assertEqual(response.status_code, 413)
         self.assertIn("too many text chunks", response.json()["detail"])
-        
+
     @patch('services.PdfReader')
     @patch('services.client.models.embed_content')
     def test_22_upload_embedding_failure(self, mock_embed, mock_pdfreader):
         """Embedding failure"""
         from main import get_current_user
         app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
-        
+
         mock_reader_instance = MagicMock()
         mock_page = MagicMock()
         mock_page.extract_text.return_value = "Valid text"
         mock_reader_instance.pages = [mock_page]
         mock_pdfreader.return_value = mock_reader_instance
-        
+
         mock_embed.side_effect = Exception("API Timeout")
-        
+
         response = client.post('/upload', files={'file': ('test.pdf', b'bad', 'application/pdf')}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
         app.dependency_overrides = {}
-        
+
         self.assertEqual(response.status_code, 500)
         self.assertIn("Failed to generate embeddings", response.json()["detail"])
         self.assertNotIn("Timeout", response.json()["detail"])
-        
+
     @patch('services.PdfReader')
     @patch('services.client.models.embed_content')
     @patch('services.collection.insert_many', new_callable=AsyncMock)
@@ -326,22 +326,22 @@ class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         """MongoDB insertion failure"""
         from main import get_current_user
         app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
-        
+
         mock_reader_instance = MagicMock()
         mock_page = MagicMock()
         mock_page.extract_text.return_value = "Valid text"
         mock_reader_instance.pages = [mock_page]
         mock_pdfreader.return_value = mock_reader_instance
-        
+
         mock_embed_response = MagicMock()
         mock_embed_response.embeddings = [MagicMock(values=[0.1]*768)]
         mock_embed.return_value = mock_embed_response
-        
+
         mock_insert.side_effect = Exception("DB Down")
-        
+
         response = client.post('/upload', files={'file': ('test.pdf', b'bad', 'application/pdf')}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
         app.dependency_overrides = {}
-        
+
         self.assertEqual(response.status_code, 500)
         self.assertIn("Database insertion failed", response.json()["detail"])
         self.assertNotIn("DB Down", response.json()["detail"])
@@ -356,12 +356,12 @@ class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
             main.limiter._storage.reset()
             cookies = {'csrf_token': 'rl_token'}
             headers = {'X-CSRF-Token': 'rl_token', 'Origin': 'http://localhost:5173', 'X-Forwarded-For': '192.168.1.1'}
-            
+
             # 10 allowed
             for _ in range(10):
                 res = client.post('/api/login', json={"email": "t@t.com", "password": "1"}, cookies=cookies, headers=headers)
                 self.assertEqual(res.status_code, 401)
-                
+
             # 11th should be 429
             res = client.post('/api/login', json={"email": "t@t.com", "password": "1"}, cookies=cookies, headers=headers)
             self.assertEqual(res.status_code, 429)
@@ -381,16 +381,16 @@ class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         main.limiter._storage.reset()
         cookies = {'csrf_token': 'rl_token', 'access_token': 'mock_token'}
         headers = {'X-CSRF-Token': 'rl_token', 'Origin': 'http://localhost:5173'}
-        
+
         from main import get_current_user
-        
+
         # User A hits 20 chats
         app.dependency_overrides[get_current_user] = lambda: {"email": "userA@test.com"}
         with patch('auth.decode_access_token', return_value={"sub": "userA@test.com"}):
             for _ in range(20):
                 res = client.post('/chat', json={"message": "hi", "chat_id": "1"}, cookies=cookies, headers=headers)
                 self.assertEqual(res.status_code, 200)
-                
+
             # 21st should be 429 and downstream not called
             mock_gen.reset_mock()
             res = client.post('/chat', json={"message": "hi", "chat_id": "1"}, cookies=cookies, headers=headers)
@@ -400,13 +400,13 @@ class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(res.headers["retry-after"].isdigit())
             self.assertGreaterEqual(int(res.headers["retry-after"]), 1)
             mock_gen.assert_not_called()
-            
+
         # User B should still be allowed
         app.dependency_overrides[get_current_user] = lambda: {"email": "userB@test.com"}
         with patch('auth.decode_access_token', return_value={"sub": "userB@test.com"}):
             res = client.post('/chat', json={"message": "hi", "chat_id": "1"}, cookies=cookies, headers=headers)
             self.assertEqual(res.status_code, 200)
-            
+
         app.dependency_overrides = {}
 
     @patch('main.process_and_store_document', new_callable=AsyncMock)
@@ -416,15 +416,15 @@ class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         main.limiter._storage.reset()
         cookies = {'csrf_token': 'rl_token', 'access_token': 'mock_token'}
         headers = {'X-CSRF-Token': 'rl_token', 'Origin': 'http://localhost:5173'}
-        
+
         from main import get_current_user
         app.dependency_overrides[get_current_user] = lambda: {"email": "upload@test.com"}
-        
+
         with patch('auth.decode_access_token', return_value={"sub": "upload@test.com"}):
             for _ in range(10):
                 res = client.post('/upload', files={'file': ('test.pdf', b'fake', 'application/pdf')}, cookies=cookies, headers=headers)
                 self.assertEqual(res.status_code, 200)
-                
+
             mock_process.reset_mock()
             res = client.post('/upload', files={'file': ('test.pdf', b'fake', 'application/pdf')}, cookies=cookies, headers=headers)
             self.assertEqual(res.status_code, 429)
@@ -433,7 +433,7 @@ class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(res.headers["retry-after"].isdigit())
             self.assertGreaterEqual(int(res.headers["retry-after"]), 1)
             mock_process.assert_not_called()
-            
+
         app.dependency_overrides = {}
 
     @patch('main.decode_access_token')
@@ -442,15 +442,15 @@ class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
     def test_27_chat_not_found_returns_404(self, mock_chats_find, mock_users_find, mock_decode):
         mock_decode.return_value = {"sub": "test@example.com"}
         mock_users_find.return_value = {"email": "test@example.com", "fullname": "Test User"}
-        
+
         # Simulate chat not found
         mock_chats_find.return_value = None
-        
+
         headers = {"x-csrf-token": "dummy_csrf"}
         cookies = {"access_token": "dummy_jwt", "csrf_token": "dummy_csrf"}
-        
+
         response = client.post("/chat", json={"message": "hello", "chat_id": "nonexistent_chat"}, headers=headers, cookies=cookies)
-        
+
         self.assertEqual(response.status_code, 404)
         self.assertIn("Chat not found", response.json()["detail"])
 
@@ -460,15 +460,15 @@ class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
     def test_28_chat_unexpected_exception_returns_500(self, mock_chats_find, mock_users_find, mock_decode):
         mock_decode.return_value = {"sub": "test@example.com"}
         mock_users_find.return_value = {"email": "test@example.com", "fullname": "Test User"}
-        
+
         # Simulate an unexpected exception in chats_collection.find_one
         mock_chats_find.side_effect = Exception("SECRET_DB_CONNECTION_STRING_ERROR")
-        
+
         headers = {"x-csrf-token": "dummy_csrf"}
         cookies = {"access_token": "dummy_jwt", "csrf_token": "dummy_csrf"}
-        
+
         response = client.post("/chat", json={"message": "hello", "chat_id": "existing_chat"}, headers=headers, cookies=cookies)
-        
+
         self.assertEqual(response.status_code, 500)
         self.assertIn("Failed to generate response. Please try again.", response.json()["detail"])
         self.assertNotIn("SECRET_DB_CONNECTION_STRING_ERROR", response.text)
@@ -479,7 +479,7 @@ class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         response = client.options('/api/login', headers=headers)
         self.assertEqual(response.headers.get('Access-Control-Allow-Origin'), 'http://localhost:5173')
         self.assertEqual(response.headers.get('Access-Control-Allow-Credentials'), 'true')
-        
+
         # Verify unexpected origin does NOT get configured allowed-origin
         headers = {'Origin': 'http://attacker.com', 'Access-Control-Request-Method': 'POST'}
         response = client.options('/api/login', headers=headers)
@@ -491,39 +491,39 @@ class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         # 2. TEST ACTUAL AUTH COOKIE CREATION
         mock_find.return_value = None
         import main
-        
+
         main.IS_PRODUCTION = False
         main.COOKIE_SAMESITE = 'lax'
-        
+
         client.cookies.clear()
         res_csrf = client.get('/api/csrf')
         token = res_csrf.json()['csrf_token']
-        
+
         response = client.post('/api/register', json={"fullname": "test", "email": "new@test.com", "password": "123"}, cookies={'csrf_token': token}, headers={'X-CSRF-Token': token, 'Origin': 'http://localhost:5173'})
         set_cookies = response.headers.get_list('set-cookie')
         access_cookie = next(c for c in set_cookies if c.startswith('access_token='))
-        
+
         self.assertIn('HttpOnly', access_cookie)
         self.assertIn('Path=/', access_cookie)
-        self.assertIn('Max-Age=604800', access_cookie)
+        self.assertIn('Max-Age=86400', access_cookie)
         self.assertIn('samesite=lax', access_cookie.lower())
         self.assertNotIn('Secure', access_cookie)
-        
+
         main.IS_PRODUCTION = True
         main.COOKIE_SAMESITE = 'none'
         main.limiter._storage.reset()
         mock_find.return_value = None
-        
+
         client.cookies.clear()
         res_csrf = client.get('/api/csrf')
         token = res_csrf.json()['csrf_token']
-        
+
         response = client.post('/api/register', json={"fullname": "test", "email": "new2@test.com", "password": "123"}, cookies={'csrf_token': token}, headers={'X-CSRF-Token': token, 'Origin': 'http://localhost:5173'})
         set_cookies = response.headers.get_list('set-cookie')
         access_cookie = next(c for c in set_cookies if c.startswith('access_token='))
         self.assertIn('samesite=none', access_cookie.lower())
         self.assertIn('Secure', access_cookie)
-        
+
         main.IS_PRODUCTION = False
         main.COOKIE_SAMESITE = 'lax'
 
@@ -532,36 +532,36 @@ class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         import main
         main.IS_PRODUCTION = False
         main.COOKIE_SAMESITE = 'lax'
-        
+
         client.cookies.clear()
         response = client.get('/api/csrf')
         self.assertEqual(response.status_code, 200)
-        
+
         json_token = response.json().get('csrf_token')
         self.assertTrue(len(json_token) >= 32)
-        
+
         set_cookies = response.headers.get_list('set-cookie')
         csrf_cookie_str = next((c for c in set_cookies if c.startswith('csrf_token=')), None)
         self.assertIsNotNone(csrf_cookie_str)
-        
+
         cookie_val = csrf_cookie_str.split(';')[0].split('=')[1]
         self.assertEqual(json_token, cookie_val)
-        
+
         self.assertIn('Path=/', csrf_cookie_str)
         self.assertNotIn('HttpOnly', csrf_cookie_str)
         self.assertNotIn('Secure', csrf_cookie_str)
         self.assertIn('samesite=lax', csrf_cookie_str.lower())
-        
+
         main.IS_PRODUCTION = True
         main.COOKIE_SAMESITE = 'none'
-        
+
         client.cookies.clear()
         response = client.get('/api/csrf')
         set_cookies = response.headers.get_list('set-cookie')
         csrf_cookie_str = next(c for c in set_cookies if c.startswith('csrf_token='))
         self.assertIn('Secure', csrf_cookie_str)
         self.assertIn('samesite=none', csrf_cookie_str.lower())
-        
+
         main.IS_PRODUCTION = False
         main.COOKIE_SAMESITE = 'lax'
 
@@ -569,16 +569,19 @@ class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         # 4. INVALID COOKIE_SAMESITE TEST
         import subprocess
         import sys
-        
+        from pathlib import Path
+
+        backend_dir = str(Path(__file__).resolve().parent)
+
         script = """
 import os
 os.environ['COOKIE_SAMESITE'] = 'banana'
 import main
 """
-        result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, cwd='backend')
+        result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, cwd=backend_dir)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("COOKIE_SAMESITE must be 'lax', 'strict', or 'none'", result.stderr)
-        
+
         script2 = """
 import os
 os.environ['COOKIE_SAMESITE'] = 'none'
@@ -586,10 +589,10 @@ os.environ['ENVIRONMENT'] = 'development'
 import main
 print(main.COOKIE_SAMESITE)
 """
-        result2 = subprocess.run([sys.executable, '-c', script2], capture_output=True, text=True, cwd='backend')
+        result2 = subprocess.run([sys.executable, '-c', script2], capture_output=True, text=True, cwd=backend_dir)
         self.assertEqual(result2.returncode, 0)
         self.assertEqual(result2.stdout.strip(), 'lax')
-        
+
         script3 = """
 import os
 os.environ['COOKIE_SAMESITE'] = 'none'
@@ -598,7 +601,7 @@ import main
 print(main.COOKIE_SAMESITE)
 print(main.IS_PRODUCTION)
 """
-        result3 = subprocess.run([sys.executable, '-c', script3], capture_output=True, text=True, cwd='backend')
+        result3 = subprocess.run([sys.executable, '-c', script3], capture_output=True, text=True, cwd=backend_dir)
         self.assertEqual(result3.returncode, 0)
         self.assertIn('none', result3.stdout)
         self.assertIn('True', result3.stdout)
@@ -607,13 +610,13 @@ print(main.IS_PRODUCTION)
         # 5. LOGOUT COOKIE DELETION
         response = client.post('/api/logout', cookies={'csrf_token': 'rl_token'}, headers={'X-CSRF-Token': 'rl_token', 'Origin': 'http://localhost:5173'})
         set_cookies = response.headers.get_list('set-cookie')
-        
+
         access_deleted = next((c for c in set_cookies if c.startswith('access_token=')), None)
-        
+
         self.assertIsNotNone(access_deleted)
         self.assertIn('""', access_deleted)
         self.assertIn('Path=/', access_deleted)
-        
+
         self.assertFalse(any('csrftoken=' in c for c in set_cookies))
 
     def test_34_security_headers(self):
@@ -625,7 +628,7 @@ print(main.IS_PRODUCTION)
         self.assertEqual(response.headers.get('X-Frame-Options'), 'DENY')
         self.assertEqual(response.headers.get('Referrer-Policy'), 'strict-origin-when-cross-origin')
         self.assertNotIn('Strict-Transport-Security', response.headers)
-        
+
         main.IS_PRODUCTION = True
         response = client.get('/api/csrf')
         self.assertEqual(response.headers.get('X-Content-Type-Options'), 'nosniff')
@@ -633,7 +636,7 @@ print(main.IS_PRODUCTION)
         self.assertEqual(response.headers.get('Referrer-Policy'), 'strict-origin-when-cross-origin')
         self.assertIn('Strict-Transport-Security', response.headers)
         self.assertEqual(response.headers.get('Strict-Transport-Security'), 'max-age=31536000; includeSubDomains')
-        
+
         main.IS_PRODUCTION = False
 
     def test_35_csrf_flow(self):
@@ -641,15 +644,69 @@ print(main.IS_PRODUCTION)
         client.cookies.clear()
         response1 = client.get('/api/csrf')
         json_token = response1.json().get('csrf_token')
-        
+
         set_cookies = response1.headers.get_list('set-cookie')
         csrf_cookie_str = next(c for c in set_cookies if c.startswith('csrf_token='))
         cookie_token = csrf_cookie_str.split(';')[0].split('=')[1]
-        
+
         self.assertEqual(json_token, cookie_token)
-        
+
         response2 = client.post('/api/logout', cookies={'csrf_token': cookie_token}, headers={'X-CSRF-Token': cookie_token, 'Origin': 'http://localhost:5173'})
         self.assertEqual(response2.status_code, 200)
+
+    @patch('main.id_token.verify_oauth2_token')
+    @patch('main.users_collection.find_one')
+    @patch('main.users_collection.insert_one')
+    def test_36_google_auth_email_verified(self, mock_insert, mock_find, mock_verify):
+        async def mock_none(*args, **kwargs): return None
+        mock_find.side_effect = mock_none
+        mock_insert.side_effect = mock_none
+
+        # Unverified email
+        mock_verify.return_value = {"email": "test@example.com", "name": "Test", "email_verified": False}
+        response = client.post('/api/auth/google', json={"credential": "fake"}, headers={'Origin': 'http://localhost:5173', 'X-CSRF-Token': 'a'}, cookies={'csrf_token': 'a'})
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["detail"], "Invalid Google token")
+
+        # Missing email_verified
+        mock_verify.return_value = {"email": "test@example.com", "name": "Test"}
+        response2 = client.post('/api/auth/google', json={"credential": "fake"}, headers={'Origin': 'http://localhost:5173', 'X-CSRF-Token': 'a'}, cookies={'csrf_token': 'a'})
+        self.assertEqual(response2.status_code, 401)
+
+        # Verified email
+        mock_verify.return_value = {"email": "test@example.com", "name": "Test", "email_verified": True}
+        response3 = client.post('/api/auth/google', json={"credential": "fake"}, headers={'Origin': 'http://localhost:5173', 'X-CSRF-Token': 'a'}, cookies={'csrf_token': 'a'})
+        self.assertEqual(response3.status_code, 200)
+
+    @patch('main.verify_password')
+    @patch('main.users_collection.find_one')
+    def test_37_login_timing_enumeration(self, mock_find, mock_verify):
+        async def mock_none(*args, **kwargs):
+            return None
+        mock_find.side_effect = mock_none
+        mock_verify.return_value = False
+
+        response = client.post('/api/login', json={"email": "nonexistent@test.com", "password": "abc"}, headers={'Origin': 'http://localhost:5173', 'X-CSRF-Token': 'a'}, cookies={'csrf_token': 'a'})
+        self.assertEqual(response.status_code, 401)
+        self.assertTrue(mock_verify.called)
+
+    def test_38_jwt_cookie_max_age_sync(self):
+        import auth
+        self.assertEqual(auth.ACCESS_TOKEN_EXPIRE_MINUTES, 1440)
+
+        script = """
+import os
+os.environ['COOKIE_SAMESITE'] = 'lax'
+from auth import ACCESS_TOKEN_EXPIRE_MINUTES
+import main
+print(ACCESS_TOKEN_EXPIRE_MINUTES * 60)
+"""
+        import subprocess
+        import sys
+        from pathlib import Path
+        backend_dir = str(Path(__file__).resolve().parent)
+        result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, cwd=backend_dir)
+        self.assertIn("86400", result.stdout)
 
 class EmojiTestResult(unittest.TextTestResult):
     def addSuccess(self, test):

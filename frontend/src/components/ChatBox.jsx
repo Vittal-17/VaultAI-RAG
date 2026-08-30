@@ -122,7 +122,7 @@ const ChatBox = ({ activeChatId, setActiveChatId, setChats }) => {
             <div className="w-16 h-16 bg-[#ffffff]/60 rounded-2xl flex items-center justify-center mb-6 shadow-xl shadow-cyan-950/5 border border-cyan-300/60">
               <div className="w-8 h-8 bg-gradient-to-r from-cyan-500 to-teal-500 rounded-xl animate-pulse shadow-md" />
             </div>
-            <h2 className="text-2xl font-bold text-[#0e3b43] mb-3">Welcome to VaultAI</h2>
+            <h2 className="text-2xl font-bold text-[#0e3b43] mb-3">Welcome to CYPHR</h2>
             <p className="text-teal-800/70 text-sm leading-relaxed">
               Upload your PDF documents in the sidebar and ask questions about them. I'll search your knowledge base and provide precise answers.
             </p>

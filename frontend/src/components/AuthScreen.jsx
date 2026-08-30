@@ -67,10 +67,10 @@ const AuthScreen = ({ onAuthSuccess }) => {
           <div className="flex justify-center items-center mb-4 relative">
             <div className="absolute w-12 h-12 bg-cyan-400 rounded-xl blur-xl opacity-40 animate-pulse" />
             <div className="w-12 h-12 bg-gradient-to-r from-cyan-500 to-teal-500 text-white rounded-xl flex items-center justify-center font-bold text-xl shadow-lg relative z-10 shadow-cyan-500/20">
-              VA
+              CY
             </div>
           </div>
-          <h1 className="text-3xl font-bold text-[#0e3b43] mb-2 tracking-tight">VaultAI</h1>
+          <h1 className="text-3xl font-bold text-[#0e3b43] mb-2 tracking-tight">CYPHR</h1>
           <p className="text-teal-800/70 text-sm">Your intelligent knowledge workspace</p>
         </div>
 

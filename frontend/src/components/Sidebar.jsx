@@ -72,9 +72,9 @@ const Sidebar = ({ sidebarOpen, user, handleLogout, chats, activeChatId, setActi
       {/* Header */}
       <div className="p-4 flex items-center mb-2">
         <div className="w-8 h-8 bg-gradient-to-r from-cyan-500 to-teal-500 rounded-lg flex items-center justify-center font-bold text-white shadow-lg shadow-cyan-500/25 mr-3">
-          VA
+          CY
         </div>
-        <h1 className="text-xl font-bold text-[#0e3b43] tracking-tight">VaultAI</h1>
+        <h1 className="text-xl font-bold text-[#0e3b43] tracking-tight">CYPHR</h1>
       </div>
       
       {/* Top Actions Header */}
