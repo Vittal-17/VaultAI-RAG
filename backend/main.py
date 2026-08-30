@@ -9,8 +9,12 @@ from pydantic import BaseModel, EmailStr
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import os
+import logging
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+logger = logging.getLogger(__name__)
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -83,6 +87,14 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="VaultAI Backend", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, custom_rate_limit_handler)
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled application exception")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error. Please try again later."}
+    )
 
 # Read environment variables
 IS_PRODUCTION = os.getenv("ENVIRONMENT") == "production"
@@ -251,8 +263,8 @@ async def google_auth(request: Request, body_req: GoogleAuthRequest, response: R
         )
         return {"message": "Login successful", "user": {"email": email, "fullname": name}}
     except ValueError as e:
-          print(">>> GOOGLE VERIFY ERROR:", e)
-          raise HTTPException(status_code=401, detail="Invalid Google token")
+        logger.warning("GOOGLE VERIFY ERROR: Invalid Google token")
+        raise HTTPException(status_code=401, detail="Invalid Google token")
 
 @app.post("/api/logout")
 @limiter.limit(RATE_LIMIT_GENERAL)
@@ -349,7 +361,7 @@ async def upload_document(request: Request, file: UploadFile = File(...), curren
             raise HTTPException(status_code=413, detail=error_msg)
         raise HTTPException(status_code=400, detail=error_msg)
     except Exception as e:
-        print(f"CRITICAL ERROR in upload_document: {str(e)}")
+        logger.exception("CRITICAL ERROR in upload_document")
         # Only pass through our own controlled Exception messages, otherwise generic 500
         safe_messages = ["Failed to generate embeddings. Upload aborted.", "Database insertion failed. Upload aborted."]
         detail = str(e) if str(e) in safe_messages else "An internal server error occurred while processing the document."
@@ -438,8 +450,10 @@ async def chat(request: Request, body_req: ChatRequest, current_user: dict = Dep
             response_payload["title"] = chat_title
 
         return response_payload
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"CRITICAL CHAT ERROR: {str(e)}")
+        logger.exception("CRITICAL CHAT ERROR")
         raise HTTPException(status_code=500, detail="Failed to generate response. Please try again.")
 
 if __name__ == "__main__":

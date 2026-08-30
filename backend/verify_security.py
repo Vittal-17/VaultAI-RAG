@@ -434,6 +434,43 @@ class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
             
         app.dependency_overrides = {}
 
+    @patch('main.decode_access_token')
+    @patch('main.users_collection.find_one', new_callable=AsyncMock)
+    @patch('main.chats_collection.find_one', new_callable=AsyncMock)
+    def test_27_chat_not_found_returns_404(self, mock_chats_find, mock_users_find, mock_decode):
+        mock_decode.return_value = {"sub": "test@example.com"}
+        mock_users_find.return_value = {"email": "test@example.com", "fullname": "Test User"}
+        
+        # Simulate chat not found
+        mock_chats_find.return_value = None
+        
+        headers = {"x-csrf-token": "dummy_csrf"}
+        cookies = {"access_token": "dummy_jwt", "csrf_token": "dummy_csrf"}
+        
+        response = client.post("/chat", json={"message": "hello", "chat_id": "nonexistent_chat"}, headers=headers, cookies=cookies)
+        
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("Chat not found", response.json()["detail"])
+
+    @patch('main.decode_access_token')
+    @patch('main.users_collection.find_one', new_callable=AsyncMock)
+    @patch('main.chats_collection.find_one', new_callable=AsyncMock)
+    def test_28_chat_unexpected_exception_returns_500(self, mock_chats_find, mock_users_find, mock_decode):
+        mock_decode.return_value = {"sub": "test@example.com"}
+        mock_users_find.return_value = {"email": "test@example.com", "fullname": "Test User"}
+        
+        # Simulate an unexpected exception in chats_collection.find_one
+        mock_chats_find.side_effect = Exception("SECRET_DB_CONNECTION_STRING_ERROR")
+        
+        headers = {"x-csrf-token": "dummy_csrf"}
+        cookies = {"access_token": "dummy_jwt", "csrf_token": "dummy_csrf"}
+        
+        response = client.post("/chat", json={"message": "hello", "chat_id": "existing_chat"}, headers=headers, cookies=cookies)
+        
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("Failed to generate response. Please try again.", response.json()["detail"])
+        self.assertNotIn("SECRET_DB_CONNECTION_STRING_ERROR", response.text)
+
 class EmojiTestResult(unittest.TextTestResult):
     def addSuccess(self, test):
         unittest.TextTestResult.addSuccess(self, test)

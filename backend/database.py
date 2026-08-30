@@ -1,6 +1,9 @@
 import os
+import logging
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -17,6 +20,6 @@ chats_collection = db["chats"]
 async def check_db_connection():
     try:
         await client.admin.command('ping')
-        print("Successfully connected to MongoDB Atlas!")
+        logger.info("Successfully connected to MongoDB Atlas!")
     except Exception as e:
-        print(f"Error connecting to MongoDB Atlas: {e}")
+        logger.exception("Error connecting to MongoDB Atlas")

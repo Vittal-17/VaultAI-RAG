@@ -1,4 +1,5 @@
 import io
+import logging
 from pypdf import PdfReader
 from google import genai
 import os
@@ -6,6 +7,8 @@ from google.genai import types
 from dotenv import load_dotenv
 from database import collection
 from openai import OpenAI
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -89,14 +92,14 @@ async def process_and_store_document(filename: str, pdf_bytes: bytes, user_email
                 "user_email": user_email
             })
         except Exception as e:
-            print(f"Error processing chunk from {filename}: {e}")
+            logger.exception("Error processing chunk from %s", filename)
             raise Exception("Failed to generate embeddings. Upload aborted.")
             
     if docs_to_insert:
         try:
             await collection.insert_many(docs_to_insert)
         except Exception as e:
-            print(f"MongoDB insertion failed for {filename}: {e}")
+            logger.exception("MongoDB insertion failed for %s", filename)
             raise Exception("Database insertion failed. Upload aborted.")
 
 async def generate_chat_response(query: str, user_email: str) -> str:
@@ -205,7 +208,7 @@ Question:
         return answer
 
     except Exception as e:
-        print(f"Error in chat generation: {e}")
+        logger.exception("Error in chat generation")
         raise e
 
 async def generate_auto_title(query: str) -> str:
@@ -224,5 +227,5 @@ async def generate_auto_title(query: str) -> str:
         )
         return title_response.choices[0].message.content.strip().replace('"', "").replace("'", "")
     except Exception as e:
-        print(f"Error in auto-title: {e}")
+        logger.warning("Error in auto-title generation, falling back to default", exc_info=True)
         return "New Conversation"
