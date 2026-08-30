@@ -12,12 +12,77 @@ import os
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from fastapi.responses import JSONResponse
+from fastapi import Request
+
+RATE_LIMIT_LOGIN = os.getenv("RATE_LIMIT_LOGIN", "10/minute")
+RATE_LIMIT_REGISTER = os.getenv("RATE_LIMIT_REGISTER", "5/hour")
+RATE_LIMIT_GOOGLE = os.getenv("RATE_LIMIT_GOOGLE", "20/minute")
+RATE_LIMIT_UPLOAD = os.getenv("RATE_LIMIT_UPLOAD", "10/hour")
+RATE_LIMIT_CHAT = os.getenv("RATE_LIMIT_CHAT", "20/minute")
+RATE_LIMIT_GENERAL = os.getenv("RATE_LIMIT_GENERAL", "100/minute")
+
+def dynamic_key_func(request: Request):
+    token = request.cookies.get("access_token")
+    if token:
+        try:
+            from auth import decode_access_token
+            payload = decode_access_token(token)
+            if payload and payload.get("sub"):
+                return f"user:{payload['sub']}"
+        except Exception:
+            pass
+    return f"ip:{get_remote_address(request)}"
+
+limiter = Limiter(key_func=dynamic_key_func)
+
+def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded) -> Response:
+    path = request.url.path
+    if "/api/login" in path:
+        msg = "Too many login attempts. Please try again later."
+    elif "/api/register" in path:
+        msg = "Too many registrations. Please try again later."
+    elif "/api/auth/google" in path:
+        msg = "Too many auth attempts. Please try again later."
+    elif "/upload" in path:
+        msg = "Upload rate limit exceeded. Please try again later."
+    elif "/chat" in path:
+        msg = "Too many chat requests. Please try again later."
+    else:
+        msg = "Too many requests. Please try again later."
+        
+    response = JSONResponse(
+        {"detail": msg}, status_code=429
+    )
+    
+    current_limit = getattr(request.state, "view_rate_limit", None)
+    if current_limit:
+        import time
+        import math
+        try:
+            window_stats = request.app.state.limiter.limiter.get_window_stats(current_limit[0], *current_limit[1])
+            reset_time = window_stats[0]
+            retry_after = max(1, math.ceil(reset_time - time.time()))
+            response.headers["Retry-After"] = str(retry_after)
+        except Exception:
+            pass
+            
+    response = request.app.state.limiter._inject_headers(
+        response, getattr(request.state, "view_rate_limit", None)
+    )
+    return response
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await check_db_connection()
     yield
 
 app = FastAPI(title="VaultAI Backend", lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, custom_rate_limit_handler)
 
 # Read environment variables
 IS_PRODUCTION = os.getenv("ENVIRONMENT") == "production"
@@ -66,6 +131,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Retry-After"],
 )
 
 class RegisterRequest(BaseModel):
@@ -85,7 +151,8 @@ class ChatRequest(BaseModel):
     chat_id: str | None = None
 
 @app.get("/api/csrf")
-async def get_csrf():
+@limiter.limit(RATE_LIMIT_GENERAL)
+async def get_csrf(request: Request):
     return {"message": "CSRF cookie set"}
 
 async def get_current_user(access_token: str | None = Cookie(None)):
@@ -103,7 +170,11 @@ async def get_current_user(access_token: str | None = Cookie(None)):
     return {"email": user["email"], "fullname": user["fullname"]}
 
 @app.post("/api/register")
-async def register(request: RegisterRequest, response: Response):
+@limiter.limit(RATE_LIMIT_REGISTER)
+async def register(request: Request, body_req: RegisterRequest, response: Response):
+    # Fix request obj access
+    request_obj = request
+    request = body_req
     existing_user = await users_collection.find_one({"email": request.email})
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -130,7 +201,10 @@ async def register(request: RegisterRequest, response: Response):
     return {"message": "User registered successfully", "user": {"email": request.email, "fullname": request.fullname}}
 
 @app.post("/api/login")
-async def login(request: LoginRequest, response: Response):
+@limiter.limit(RATE_LIMIT_LOGIN)
+async def login(request: Request, body_req: LoginRequest, response: Response):
+    request_obj = request
+    request = body_req
     user = await users_collection.find_one({"email": request.email})
     if not user or not verify_password(request.password, user["hashed_password"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -147,7 +221,10 @@ async def login(request: LoginRequest, response: Response):
     return {"message": "Login successful", "user": {"email": user["email"], "fullname": user["fullname"]}}
 
 @app.post("/api/auth/google")
-async def google_auth(request: GoogleAuthRequest, response: Response):
+@limiter.limit(RATE_LIMIT_GOOGLE)
+async def google_auth(request: Request, body_req: GoogleAuthRequest, response: Response):
+    request_obj = request
+    request = body_req
     try:
         idinfo = id_token.verify_oauth2_token(request.credential, google_requests.Request(), GOOGLE_CLIENT_ID,clock_skew_in_seconds=60,)
         email = idinfo['email']
@@ -178,7 +255,8 @@ async def google_auth(request: GoogleAuthRequest, response: Response):
           raise HTTPException(status_code=401, detail="Invalid Google token")
 
 @app.post("/api/logout")
-async def logout(response: Response):
+@limiter.limit(RATE_LIMIT_GENERAL)
+async def logout(request: Request, response: Response):
   response.delete_cookie(
       "access_token", httponly=True, samesite="lax", secure=IS_PRODUCTION
   )
@@ -188,7 +266,8 @@ async def logout(response: Response):
   return {"message": "Logged out successfully"}
 
 @app.get("/api/me")
-async def get_me(current_user: dict = Depends(get_current_user)):
+@limiter.limit(RATE_LIMIT_GENERAL)
+async def get_me(request: Request, current_user: dict = Depends(get_current_user)):
     return {"user": current_user}
 
 class ChatRequest(BaseModel):
@@ -196,7 +275,8 @@ class ChatRequest(BaseModel):
     chat_id: str | None = None
 
 @app.get("/api/documents")
-async def get_documents(current_user: dict = Depends(get_current_user)):
+@limiter.limit(RATE_LIMIT_GENERAL)
+async def get_documents(request: Request, current_user: dict = Depends(get_current_user)):
     # Aggregate unique filenames for this user
     pipeline = [
         {"$match": {"user_email": current_user["email"]}},
@@ -207,14 +287,16 @@ async def get_documents(current_user: dict = Depends(get_current_user)):
     return [{"filename": doc["_id"]} for doc in docs]
 
 @app.delete("/api/documents/{filename}")
-async def delete_document(filename: str, current_user: dict = Depends(get_current_user)):
+@limiter.limit(RATE_LIMIT_GENERAL)
+async def delete_document(request: Request, filename: str, current_user: dict = Depends(get_current_user)):
     result = await collection.delete_many({"user_email": current_user["email"], "filename": filename})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Document not found")
     return {"message": "Document deleted successfully"}
 
 @app.get("/api/chats")
-async def get_chats(current_user: dict = Depends(get_current_user)):
+@limiter.limit(RATE_LIMIT_GENERAL)
+async def get_chats(request: Request, current_user: dict = Depends(get_current_user)):
     cursor = chats_collection.find({"user_email": current_user["email"]}, {"messages": 0}).sort("created_at", -1)
     chats = await cursor.to_list(length=None)
     for chat in chats:
@@ -222,7 +304,8 @@ async def get_chats(current_user: dict = Depends(get_current_user)):
     return chats
 
 @app.post("/api/chats/new")
-async def create_new_chat(current_user: dict = Depends(get_current_user)):
+@limiter.limit(RATE_LIMIT_GENERAL)
+async def create_new_chat(request: Request, current_user: dict = Depends(get_current_user)):
     chat_id = str(uuid.uuid4())
     chat_doc = {
         "chat_id": chat_id,
@@ -235,7 +318,8 @@ async def create_new_chat(current_user: dict = Depends(get_current_user)):
     return {"chat_id": chat_id, "title": chat_doc["title"]}
 
 @app.get("/api/chats/{chat_id}")
-async def get_chat(chat_id: str, current_user: dict = Depends(get_current_user)):
+@limiter.limit(RATE_LIMIT_GENERAL)
+async def get_chat(request: Request, chat_id: str, current_user: dict = Depends(get_current_user)):
     chat = await chats_collection.find_one({"chat_id": chat_id, "user_email": current_user["email"]}, {"_id": 0})
     if not chat:
         raise HTTPException(status_code=404, detail="Chat not found")
@@ -245,7 +329,8 @@ MAX_PDF_SIZE_MB = int(os.getenv("MAX_PDF_SIZE_MB", 25))
 MAX_PDF_SIZE_BYTES = MAX_PDF_SIZE_MB * 1024 * 1024
 
 @app.post("/upload")
-async def upload_document(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+@limiter.limit(RATE_LIMIT_UPLOAD)
+async def upload_document(request: Request, file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
     if not file.filename.endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
         
@@ -274,7 +359,8 @@ class TitleRequest(BaseModel):
     title: str
 
 @app.patch("/api/chats/{chat_id}/title")
-async def update_chat_title(chat_id: str, req: TitleRequest, current_user: dict = Depends(get_current_user)):
+@limiter.limit(RATE_LIMIT_GENERAL)
+async def update_chat_title(request: Request, chat_id: str, req: TitleRequest, current_user: dict = Depends(get_current_user)):
     result = await chats_collection.update_one(
         {"chat_id": chat_id, "user_email": current_user["email"]},
         {"$set": {"title": req.title}}
@@ -284,7 +370,8 @@ async def update_chat_title(chat_id: str, req: TitleRequest, current_user: dict 
     return {"message": "Title updated successfully"}
 
 @app.delete("/api/chats/{chat_id}")
-async def delete_chat(chat_id: str, current_user: dict = Depends(get_current_user)):
+@limiter.limit(RATE_LIMIT_GENERAL)
+async def delete_chat(request: Request, chat_id: str, current_user: dict = Depends(get_current_user)):
     result = await chats_collection.delete_one(
         {"chat_id": chat_id, "user_email": current_user["email"]}
     )
@@ -293,7 +380,10 @@ async def delete_chat(chat_id: str, current_user: dict = Depends(get_current_use
     return {"message": "Chat successfully deleted"}
 
 @app.post("/chat")
-async def chat(request: ChatRequest, current_user: dict = Depends(get_current_user)):
+@limiter.limit(RATE_LIMIT_CHAT)
+async def chat(request: Request, body_req: ChatRequest, current_user: dict = Depends(get_current_user)):
+    request_obj = request
+    request = body_req
     try:
         chat_id = request.chat_id
         is_new_chat = False
@@ -353,4 +443,4 @@ async def chat(request: ChatRequest, current_user: dict = Depends(get_current_us
         raise HTTPException(status_code=500, detail="Failed to generate response. Please try again.")
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, proxy_headers=True, forwarded_allow_ips="*")

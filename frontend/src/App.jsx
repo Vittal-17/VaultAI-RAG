@@ -62,7 +62,7 @@ function App() {
       setUploadedFiles([]);
       toast.success("Logged out successfully");
     } catch (err) {
-      toast.error('Logout failed');
+      toast.error(err.response?.data?.detail || 'Logout failed');
     } finally {
       setIsLoggingOut(false);
     }

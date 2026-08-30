@@ -20,7 +20,7 @@ const KnowledgeBaseModal = ({ isOpen, onClose, uploadedFiles, setUploadedFiles }
       setUploadedFiles(prev => prev.filter(f => f.filename !== filename));
       toast.success("Document removed");
     } catch (err) {
-      toast.error("Failed to delete document");
+      toast.error(err.response?.data?.detail || "Failed to delete document");
     }
   };
 

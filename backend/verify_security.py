@@ -13,7 +13,11 @@ from services import generate_chat_response
 client = TestClient(app)
 
 class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
-
+    
+    def setUp(self):
+        import main
+        main.limiter._storage.reset()
+        
     @patch("services.collection")
     @patch("services.client.models.embed_content")
     @patch("services.gorouter_client.chat.completions.create")
@@ -339,6 +343,96 @@ class TestVaultAISecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 500)
         self.assertIn("Database insertion failed", response.json()["detail"])
         self.assertNotIn("DB Down", response.json()["detail"])
+
+
+    def test_24_rate_limit_login(self):
+        """Login requests over limit return 429"""
+        from unittest.mock import AsyncMock
+        with patch('main.users_collection.find_one', new_callable=AsyncMock) as mock_find:
+            mock_find.return_value = None  # user not found, will return 401
+            import main
+            main.limiter._storage.reset()
+            cookies = {'csrf_token': 'rl_token'}
+            headers = {'X-CSRF-Token': 'rl_token', 'Origin': 'http://localhost:5173', 'X-Forwarded-For': '192.168.1.1'}
+            
+            # 10 allowed
+            for _ in range(10):
+                res = client.post('/api/login', json={"email": "t@t.com", "password": "1"}, cookies=cookies, headers=headers)
+                self.assertEqual(res.status_code, 401)
+                
+            # 11th should be 429
+            res = client.post('/api/login', json={"email": "t@t.com", "password": "1"}, cookies=cookies, headers=headers)
+            self.assertEqual(res.status_code, 429)
+            self.assertIn("Too many login attempts", res.json()["detail"])
+            self.assertIn("retry-after", res.headers)
+            self.assertTrue(res.headers["retry-after"].isdigit())
+            self.assertGreaterEqual(int(res.headers["retry-after"]), 1)
+
+    @patch('main.generate_chat_response')
+    @patch('main.chats_collection.find_one', new_callable=AsyncMock)
+    @patch('main.chats_collection.update_one', new_callable=AsyncMock)
+    def test_25_rate_limit_chat_user_isolated(self, mock_update, mock_find, mock_gen):
+        """User A exhausting quota does not affect User B and bypasses expensive work"""
+        mock_gen.return_value = "mocked_response"
+        mock_find.return_value = {"title": "Test"}
+        import main
+        main.limiter._storage.reset()
+        cookies = {'csrf_token': 'rl_token', 'access_token': 'mock_token'}
+        headers = {'X-CSRF-Token': 'rl_token', 'Origin': 'http://localhost:5173'}
+        
+        from main import get_current_user
+        
+        # User A hits 20 chats
+        app.dependency_overrides[get_current_user] = lambda: {"email": "userA@test.com"}
+        with patch('auth.decode_access_token', return_value={"sub": "userA@test.com"}):
+            for _ in range(20):
+                res = client.post('/chat', json={"message": "hi", "chat_id": "1"}, cookies=cookies, headers=headers)
+                self.assertEqual(res.status_code, 200)
+                
+            # 21st should be 429 and downstream not called
+            mock_gen.reset_mock()
+            res = client.post('/chat', json={"message": "hi", "chat_id": "1"}, cookies=cookies, headers=headers)
+            self.assertEqual(res.status_code, 429)
+            self.assertIn("Too many chat requests", res.json()["detail"])
+            self.assertIn("retry-after", res.headers)
+            self.assertTrue(res.headers["retry-after"].isdigit())
+            self.assertGreaterEqual(int(res.headers["retry-after"]), 1)
+            mock_gen.assert_not_called()
+            
+        # User B should still be allowed
+        app.dependency_overrides[get_current_user] = lambda: {"email": "userB@test.com"}
+        with patch('auth.decode_access_token', return_value={"sub": "userB@test.com"}):
+            res = client.post('/chat', json={"message": "hi", "chat_id": "1"}, cookies=cookies, headers=headers)
+            self.assertEqual(res.status_code, 200)
+            
+        app.dependency_overrides = {}
+
+    @patch('main.process_and_store_document', new_callable=AsyncMock)
+    def test_26_rate_limit_upload(self, mock_process):
+        """Upload requests over limit return 429 and bypass processing"""
+        import main
+        main.limiter._storage.reset()
+        cookies = {'csrf_token': 'rl_token', 'access_token': 'mock_token'}
+        headers = {'X-CSRF-Token': 'rl_token', 'Origin': 'http://localhost:5173'}
+        
+        from main import get_current_user
+        app.dependency_overrides[get_current_user] = lambda: {"email": "upload@test.com"}
+        
+        with patch('auth.decode_access_token', return_value={"sub": "upload@test.com"}):
+            for _ in range(10):
+                res = client.post('/upload', files={'file': ('test.pdf', b'fake', 'application/pdf')}, cookies=cookies, headers=headers)
+                self.assertEqual(res.status_code, 200)
+                
+            mock_process.reset_mock()
+            res = client.post('/upload', files={'file': ('test.pdf', b'fake', 'application/pdf')}, cookies=cookies, headers=headers)
+            self.assertEqual(res.status_code, 429)
+            self.assertIn("Upload rate limit exceeded", res.json()["detail"])
+            self.assertIn("retry-after", res.headers)
+            self.assertTrue(res.headers["retry-after"].isdigit())
+            self.assertGreaterEqual(int(res.headers["retry-after"]), 1)
+            mock_process.assert_not_called()
+            
+        app.dependency_overrides = {}
 
 class EmojiTestResult(unittest.TextTestResult):
     def addSuccess(self, test):

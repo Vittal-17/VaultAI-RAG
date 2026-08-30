@@ -22,7 +22,7 @@ const Sidebar = ({ sidebarOpen, user, handleLogout, chats, activeChatId, setActi
       setChats(prev => [res.data, ...prev]);
       setActiveChatId(res.data.chat_id);
     } catch (err) {
-      toast.error("Failed to create new chat");
+      toast.error(err.response?.data?.detail || "Failed to create new chat");
     }
   };
 
@@ -34,7 +34,7 @@ const Sidebar = ({ sidebarOpen, user, handleLogout, chats, activeChatId, setActi
       if (activeChatId === chatId) setActiveChatId(null);
       toast.success("Chat removed");
     } catch (err) {
-      toast.error("Failed to delete chat");
+      toast.error(err.response?.data?.detail || "Failed to delete chat");
     }
   };
 
@@ -54,7 +54,7 @@ const Sidebar = ({ sidebarOpen, user, handleLogout, chats, activeChatId, setActi
       setChats(prev => prev.map(c => c.chat_id === chatId ? { ...c, title: editTitleText } : c));
       toast.success("Title updated");
     } catch (err) {
-      toast.error("Failed to update title");
+      toast.error(err.response?.data?.detail || "Failed to update title");
     }
     setEditingChatId(null);
   };

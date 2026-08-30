@@ -31,7 +31,7 @@ const ChatBox = ({ activeChatId, setActiveChatId, setChats }) => {
         const res = await axios.get(`/api/chats/${activeChatId}`);
         setMessages(res.data.messages || []);
       } catch (err) {
-        toast.error("Failed to load chat history");
+        toast.error(err.response?.data?.detail || "Failed to load chat history");
         setMessages([]);
       }
     };
@@ -90,7 +90,7 @@ const ChatBox = ({ activeChatId, setActiveChatId, setChats }) => {
       }
     } catch (error) {
       console.error('Error during chat:', error);
-      toast.error("Failed to fetch response");
+      toast.error(error.response?.data?.detail || "Failed to fetch response");
       const errorMessage = { role: 'assistant', content: 'Sorry, I encountered an error while processing your request. Please try again.' };
       setMessages(prev => [...prev, errorMessage]);
     } finally {
