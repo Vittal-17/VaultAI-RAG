@@ -83,6 +83,8 @@ def custom_rate_limit_handler(request: Request, exc: RateLimitExceeded) -> Respo
 async def lifespan(app: FastAPI):
     await check_db_connection()
     yield
+    from embeddings import close_embedding_provider
+    await close_embedding_provider()
 
 app = FastAPI(title="CYPHR Backend", lifespan=lifespan)
 app.state.limiter = limiter

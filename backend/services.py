@@ -1,25 +1,26 @@
+import os
 import io
 import logging
 from pypdf import PdfReader
-from google import genai
-import os
-from google.genai import types
 from dotenv import load_dotenv
 from database import collection
 from openai import AsyncOpenAI
+
+from embeddings import (
+    get_embedding_provider,
+    EMBEDDING_BATCH_SIZE,
+    EmbeddingError,
+    EmbeddingQuotaError
+)
 
 logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-client = genai.Client(api_key=GEMINI_API_KEY)
-
 gorouter_client = AsyncOpenAI(
     api_key=os.getenv("GOROUTER_API_KEY"),
-    base_url="https://api.justwoker.icu/v1",
+    base_url="https://gorouter.app/v1",
 )
-
 MAX_PDF_PAGES = int(os.getenv("MAX_PDF_PAGES", 200))
 MAX_CHUNKS_PER_DOCUMENT = int(os.getenv("MAX_CHUNKS_PER_DOCUMENT", 5000))
 
@@ -72,28 +73,33 @@ async def process_and_store_document(filename: str, pdf_bytes: bytes, user_email
         raise ValueError(f"PDF produces too many text chunks. Maximum is {MAX_CHUNKS_PER_DOCUMENT}.")
 
     docs_to_insert = []
-    for chunk_info in all_chunks_info:
-        try:
-            response = await client.aio.models.embed_content(
-                model='gemini-embedding-001',
-                contents=chunk_info["text"],
-                config=types.EmbedContentConfig(
-                    output_dimensionality=768
-                ),
-            )
-            embedding = response.embeddings[0].values
+    provider = get_embedding_provider()
 
+    for batch_start in range(0, len(all_chunks_info), EMBEDDING_BATCH_SIZE):
+        batch = all_chunks_info[batch_start:batch_start + EMBEDDING_BATCH_SIZE]
+        batch_texts = [chunk["text"] for chunk in batch]
+
+        try:
+            batch_embeddings = await provider.embed_documents(batch_texts)
+        except EmbeddingQuotaError as e:
+            logger.error("Upload aborted due to quota exhaustion.")
+            raise Exception("Embedding quota exhausted. Please try again later.") from e
+        except Exception as e:
+            logger.exception("Error processing chunk batch from %s", filename)
+            raise Exception("Failed to generate embeddings. Upload aborted.") from e
+
+        for chunk_info, emb in zip(batch, batch_embeddings):
             docs_to_insert.append({
                 "filename": filename,
                 "page": chunk_info["page"],
                 "chunk_index": chunk_info["chunk_index"],
                 "text": chunk_info["text"],
-                "embedding": embedding,
-                "user_email": user_email
+                "embedding": emb,
+                "user_email": user_email,
+                "embedding_provider": getattr(provider, "provider_id", "google"),
+                "embedding_model": getattr(provider, "model_id", "gemini-embedding-001"),
+                "embedding_dimensions": getattr(provider, "dimensions", 768)
             })
-        except Exception as e:
-            logger.exception("Error processing chunk from %s", filename)
-            raise Exception("Failed to generate embeddings. Upload aborted.")
 
     if docs_to_insert:
         try:
@@ -105,15 +111,8 @@ async def process_and_store_document(filename: str, pdf_bytes: bytes, user_email
 async def generate_chat_response(query: str, user_email: str) -> str:
     """Searches MongoDB for relevant chunks, isolates tenant data, and formats a sourced response."""
     try:
-        # Generate embedding for the query
-        query_response = await client.aio.models.embed_content(
-            model='gemini-embedding-001',
-            contents=query,
-            config=types.EmbedContentConfig(
-                output_dimensionality=768
-            ),
-        )
-        query_embedding = query_response.embeddings[0].values
+        provider = get_embedding_provider()
+        query_embedding = await provider.embed_query(query)
 
         # Query database for all unique filenames belonging to the user efficiently
         all_filenames = await collection.distinct("filename", {"user_email": user_email})
@@ -181,7 +180,7 @@ Question:
 
         # Generate response using GoRouter
         response = await gorouter_client.chat.completions.create(
-            model="claude-opus-4-8",
+            model="claude-opus-5",
             messages=[
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": query}
@@ -215,7 +214,7 @@ async def generate_auto_title(query: str) -> str:
     """Generates a short punchy title based on the first query."""
     try:
         title_response = await gorouter_client.chat.completions.create(
-            model="claude-opus-4-8",
+            model="claude-opus-5",
             messages=[{
                 "role": "user",
                 "content": (
