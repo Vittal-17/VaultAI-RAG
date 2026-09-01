@@ -19,8 +19,8 @@ class TestCYPHRSecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         main.limiter._storage.reset()
 
     @patch("services.collection")
-    @patch("services.client.models.embed_content")
-    @patch("services.gorouter_client.chat.completions.create")
+    @patch("services.client.aio.models.embed_content", new_callable=AsyncMock)
+    @patch("services.gorouter_client.chat.completions.create", new_callable=AsyncMock)
     async def test_1_multi_tenant_isolation(self, mock_gorouter, mock_embed, mock_collection):
         """[1] Multi-Tenant Isolation Verification Test"""
         mock_embed_response = MagicMock()
@@ -48,8 +48,8 @@ class TestCYPHRSecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(vector_search_stage_beta["filter"]["user_email"], {"$eq": "user_beta@test.com"})
 
     @patch("services.collection")
-    @patch("services.client.models.embed_content")
-    @patch("services.gorouter_client.chat.completions.create")
+    @patch("services.client.aio.models.embed_content", new_callable=AsyncMock)
+    @patch("services.gorouter_client.chat.completions.create", new_callable=AsyncMock)
     async def test_2_filename_aware_scoping(self, mock_gorouter, mock_embed, mock_collection):
         """[2] Filename-Aware Scoping Verification Test"""
         mock_embed_response = MagicMock()
@@ -73,8 +73,8 @@ class TestCYPHRSecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(vector_search_stage["filter"]["filename"], {"$eq": "testnewnewtestnew.pdf"})
 
     @patch("services.collection")
-    @patch("services.client.models.embed_content")
-    @patch("services.gorouter_client.chat.completions.create")
+    @patch("services.client.aio.models.embed_content", new_callable=AsyncMock)
+    @patch("services.gorouter_client.chat.completions.create", new_callable=AsyncMock)
     async def test_3_metadata_page_fallback(self, mock_gorouter, mock_embed, mock_collection):
         """[3] Metadata Page Integrity & Fallback Test"""
         mock_embed_response = MagicMock()
@@ -97,8 +97,8 @@ class TestCYPHRSecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("(Page ?)", answer)
 
     @patch("services.collection")
-    @patch("services.client.models.embed_content")
-    @patch("services.gorouter_client.chat.completions.create")
+    @patch("services.client.aio.models.embed_content", new_callable=AsyncMock)
+    @patch("services.gorouter_client.chat.completions.create", new_callable=AsyncMock)
     async def test_4_precision_citation_filtering(self, mock_gorouter, mock_embed, mock_collection):
         """[4] Post-LLM Precision Citation Filtering Test"""
         mock_embed_response = MagicMock()
@@ -299,7 +299,7 @@ class TestCYPHRSecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         self.assertIn("too many text chunks", response.json()["detail"])
 
     @patch('services.PdfReader')
-    @patch('services.client.models.embed_content')
+    @patch('services.client.aio.models.embed_content', new_callable=AsyncMock)
     def test_22_upload_embedding_failure(self, mock_embed, mock_pdfreader):
         """Embedding failure"""
         from main import get_current_user
@@ -321,7 +321,7 @@ class TestCYPHRSecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Timeout", response.json()["detail"])
 
     @patch('services.PdfReader')
-    @patch('services.client.models.embed_content')
+    @patch('services.client.aio.models.embed_content', new_callable=AsyncMock)
     @patch('services.collection.insert_many', new_callable=AsyncMock)
     def test_23_upload_mongodb_failure(self, mock_insert, mock_embed, mock_pdfreader):
         """MongoDB insertion failure"""
@@ -737,6 +737,27 @@ print(ACCESS_TOKEN_EXPIRE_MINUTES * 60)
         req.cookies.get.return_value = "invalid_jwt"
         key_invalid = main.dynamic_key_func(req)
         self.assertEqual(key_invalid, "ip:9.9.9.9")
+
+    @patch("services.client.aio.models.embed_content", new_callable=AsyncMock)
+    @patch("services.gorouter_client.chat.completions.create", new_callable=AsyncMock)
+    async def test_40_patch_7b_async_embedding_used(self, mock_gorouter, mock_embed):
+        """PATCH 7B: Verify async embedding and chat completion APIs are used"""
+        from services import generate_chat_response
+        mock_embed_response = MagicMock()
+        mock_embed_response.embeddings = [MagicMock(values=[0.9]*768)]
+        mock_embed.return_value = mock_embed_response
+        mock_gorouter_response = MagicMock()
+        mock_gorouter_response.choices = [MagicMock(message=MagicMock(content="Async response"))]
+        mock_gorouter.return_value = mock_gorouter_response
+        with patch("services.collection.distinct", new_callable=AsyncMock, return_value=["test.pdf"]), \
+             patch("services.collection.aggregate") as mock_aggregate:
+            mock_cursor = AsyncMock()
+            mock_cursor.to_list = AsyncMock(return_value=[{"filename": "test.pdf", "page": 1, "text": "async data"}])
+            mock_aggregate.return_value = mock_cursor
+            result = await generate_chat_response("test query", "user@test.com")
+            mock_embed.assert_awaited_once()
+            mock_gorouter.assert_awaited_once()
+            self.assertIn("Async response", result)
 
 
 class EmojiTestResult(unittest.TextTestResult):

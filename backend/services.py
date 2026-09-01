@@ -6,7 +6,7 @@ import os
 from google.genai import types
 from dotenv import load_dotenv
 from database import collection
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +15,7 @@ load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-gorouter_client = OpenAI(
+gorouter_client = AsyncOpenAI(
     api_key=os.getenv("GOROUTER_API_KEY"),
     base_url="https://api.justwoker.icu/v1",
 )
@@ -29,19 +29,19 @@ def extract_text_from_pdf(pdf_bytes: bytes) -> list[dict]:
         reader = PdfReader(io.BytesIO(pdf_bytes))
     except Exception:
         raise ValueError("Invalid or corrupted PDF file.")
-        
+
     if len(reader.pages) > MAX_PDF_PAGES:
         raise ValueError(f"PDF has too many pages. Maximum is {MAX_PDF_PAGES}.")
-        
+
     pages_data = []
     for i, page in enumerate(reader.pages):
         page_text = page.extract_text()
         if page_text and page_text.strip():
             pages_data.append({"page": i + 1, "text": page_text})
-    
+
     if not pages_data:
         raise ValueError("PDF contains no extractable text.")
-        
+
     return pages_data
 
 def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> list[str]:
@@ -57,7 +57,7 @@ def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> list[st
 async def process_and_store_document(filename: str, pdf_bytes: bytes, user_email: str):
     """Extracts text, chunks it, generates embeddings, and stores in MongoDB."""
     pages_data = extract_text_from_pdf(pdf_bytes)
-    
+
     all_chunks_info = []
     for page_info in pages_data:
         chunks = chunk_text(page_info["text"])
@@ -67,14 +67,14 @@ async def process_and_store_document(filename: str, pdf_bytes: bytes, user_email
                 "chunk_index": i,
                 "text": chunk
             })
-            
+
     if len(all_chunks_info) > MAX_CHUNKS_PER_DOCUMENT:
         raise ValueError(f"PDF produces too many text chunks. Maximum is {MAX_CHUNKS_PER_DOCUMENT}.")
-        
+
     docs_to_insert = []
     for chunk_info in all_chunks_info:
         try:
-            response = client.models.embed_content(
+            response = await client.aio.models.embed_content(
                 model='gemini-embedding-001',
                 contents=chunk_info["text"],
                 config=types.EmbedContentConfig(
@@ -82,7 +82,7 @@ async def process_and_store_document(filename: str, pdf_bytes: bytes, user_email
                 ),
             )
             embedding = response.embeddings[0].values
-            
+
             docs_to_insert.append({
                 "filename": filename,
                 "page": chunk_info["page"],
@@ -94,7 +94,7 @@ async def process_and_store_document(filename: str, pdf_bytes: bytes, user_email
         except Exception as e:
             logger.exception("Error processing chunk from %s", filename)
             raise Exception("Failed to generate embeddings. Upload aborted.")
-            
+
     if docs_to_insert:
         try:
             await collection.insert_many(docs_to_insert)
@@ -106,7 +106,7 @@ async def generate_chat_response(query: str, user_email: str) -> str:
     """Searches MongoDB for relevant chunks, isolates tenant data, and formats a sourced response."""
     try:
         # Generate embedding for the query
-        query_response = client.models.embed_content(
+        query_response = await client.aio.models.embed_content(
             model='gemini-embedding-001',
             contents=query,
             config=types.EmbedContentConfig(
@@ -117,7 +117,7 @@ async def generate_chat_response(query: str, user_email: str) -> str:
 
         # Query database for all unique filenames belonging to the user efficiently
         all_filenames = await collection.distinct("filename", {"user_email": user_email})
-        
+
         # Filename Intent Detection
         query_lower = query.lower()
         target_filename = None
@@ -169,7 +169,7 @@ async def generate_chat_response(query: str, user_email: str) -> str:
         prompt = f"""You are CYPHR, a precise and highly analytical knowledge assistant.
 The user has access to the following files in their Knowledge Base: {all_filenames}
 
-Answer the user's question explicitly relying on the provided context chunks below. 
+Answer the user's question explicitly relying on the provided context chunks below.
 Do not hallucinate external information. If the answer is not in the context, state that you do not have enough information.
 
 Context:
@@ -180,7 +180,7 @@ Question:
 """
 
         # Generate response using GoRouter
-        response = gorouter_client.chat.completions.create(
+        response = await gorouter_client.chat.completions.create(
             model="claude-opus-4-8",
             messages=[
                 {"role": "system", "content": prompt},
@@ -214,7 +214,7 @@ Question:
 async def generate_auto_title(query: str) -> str:
     """Generates a short punchy title based on the first query."""
     try:
-        title_response = gorouter_client.chat.completions.create(
+        title_response = await gorouter_client.chat.completions.create(
             model="claude-opus-4-8",
             messages=[{
                 "role": "user",
