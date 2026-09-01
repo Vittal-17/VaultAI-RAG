@@ -168,7 +168,8 @@ class TestCYPHRSecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         response = client.post('/api/logout', cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'def'})
         self.assertEqual(response.status_code, 403)
 
-    def test_11_csrf_valid_token_and_auth(self):
+    @patch("main.chats_collection.insert_one", new_callable=AsyncMock)
+    def test_11_csrf_valid_token_and_auth(self, mock_insert):
         """8, 14, 15. Valid CSRF token + Auth"""
         cookies = {'csrf_token': 'match'}
         headers = {'X-CSRF-Token': 'match', 'Origin': 'http://localhost:5173'}
@@ -707,6 +708,36 @@ print(ACCESS_TOKEN_EXPIRE_MINUTES * 60)
         backend_dir = str(Path(__file__).resolve().parent)
         result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, cwd=backend_dir)
         self.assertIn("86400", result.stdout)
+    def test_39_patch_7a_rate_limit_spoofing(self):
+        # PATCH 7A TEST
+        # Verify default uvicorn config is safe and does not use wildcard forwarded_allow_ips
+        import subprocess
+        import sys
+        from pathlib import Path
+        backend_dir = str(Path(__file__).resolve().parent)
+        # Check Procfile
+        with open(os.path.join(backend_dir, "Procfile"), "r") as f:
+            procfile_content = f.read()
+            self.assertNotIn('--forwarded-allow-ips="*"', procfile_content)
+        # Check main.py
+        with open(os.path.join(backend_dir, "main.py"), "r") as f:
+            main_content = f.read()
+            self.assertNotIn('forwarded_allow_ips="*"', main_content)
+
+        # Check dynamic_key_func fallback
+        import main
+        from fastapi import Request
+        from unittest.mock import MagicMock
+        req = MagicMock(spec=Request)
+        req.cookies.get.return_value = None
+        req.client.host = "9.9.9.9"
+        key = main.dynamic_key_func(req)
+        self.assertEqual(key, "ip:9.9.9.9")
+
+        req.cookies.get.return_value = "invalid_jwt"
+        key_invalid = main.dynamic_key_func(req)
+        self.assertEqual(key_invalid, "ip:9.9.9.9")
+
 
 class EmojiTestResult(unittest.TextTestResult):
     def addSuccess(self, test):

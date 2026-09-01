@@ -505,4 +505,4 @@ async def chat(request: Request, body_req: ChatRequest, current_user: dict = Dep
         raise HTTPException(status_code=500, detail="Failed to generate response. Please try again.")
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, proxy_headers=True, forwarded_allow_ips="*")
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, proxy_headers=True, forwarded_allow_ips=os.getenv("FORWARDED_ALLOW_IPS", "127.0.0.1"))
