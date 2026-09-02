@@ -15,7 +15,7 @@ class EmbeddingError(Exception): pass
 class EmbeddingQuotaError(EmbeddingError): pass
 class EmbeddingConfigurationError(EmbeddingError): pass
 
-EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "google").lower()
+EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "jina").lower()
 EMBEDDING_DIMENSIONS = int(os.getenv("EMBEDDING_DIMENSIONS", "768"))
 EMBEDDING_BATCH_SIZE = int(os.getenv("EMBEDDING_BATCH_SIZE", "50"))
 
@@ -48,79 +48,6 @@ class EmbeddingProvider(ABC):
             raise EmbeddingError(f"Embedding dimension mismatch. Expected {EMBEDDING_DIMENSIONS}, got {len(emb)}")
         if not all(isinstance(x, (int, float)) for x in emb):
             raise EmbeddingError("Embedding must contain numeric values.")
-
-class GoogleEmbeddingProvider(EmbeddingProvider):
-    def __init__(self):
-        from google import genai
-        api_key = os.getenv("GEMINI_API_KEY", "dummy")
-        self.client = genai.Client(api_key=api_key)
-        self.provider_id = "google"
-        self.model_id = os.getenv("GOOGLE_EMBEDDING_MODEL", "gemini-embedding-001")
-        self.dimensions = EMBEDDING_DIMENSIONS
-
-    async def embed_query(self, text: str) -> List[float]:
-        from google.genai import types
-        try:
-            response = await self.client.aio.models.embed_content(
-                model=self.model_id,
-                contents=text,
-                config=types.EmbedContentConfig(output_dimensionality=EMBEDDING_DIMENSIONS)
-            )
-            if not response or not hasattr(response, 'embeddings') or not response.embeddings:
-                raise EmbeddingError("Invalid or empty response from Google API.")
-            emb = response.embeddings[0].values
-            self.validate_embedding(emb)
-            return emb
-        except Exception as e:
-            error_str = str(e)
-            if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-                logger.error("Embedding provider quota is exhausted.")
-                raise EmbeddingQuotaError("Embedding provider quota is exhausted.") from e
-            raise EmbeddingError(f"Google embedding failed: {error_str}") from e
-
-    async def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        from google.genai import types
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                response = await self.client.aio.models.embed_content(
-                    model=self.model_id,
-                    contents=texts,
-                    config=types.EmbedContentConfig(output_dimensionality=EMBEDDING_DIMENSIONS)
-                )
-
-                if not response or not hasattr(response, 'embeddings'):
-                    raise EmbeddingError("Invalid response from embedding API.")
-
-                if len(response.embeddings) != len(texts):
-                    raise EmbeddingError(f"Batch response count mismatch. Expected {len(texts)}, got {len(response.embeddings)}")
-
-                result = []
-                for emb_obj in response.embeddings:
-                    emb = emb_obj.values
-                    self.validate_embedding(emb)
-                    result.append(emb)
-
-                return result
-
-            except Exception as e:
-                if isinstance(e, EmbeddingError) and not isinstance(e, EmbeddingQuotaError):
-                    raise
-                error_str = str(e)
-                if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-                    if attempt < max_retries - 1:
-                        logger.warning(f"Embedding provider quota exhausted. Retrying in {2 ** attempt} seconds...")
-                        await asyncio.sleep(2 ** attempt)
-                        continue
-                    else:
-                        logger.error("Embedding provider quota is exhausted.")
-                        raise EmbeddingQuotaError("Embedding provider quota is exhausted.") from e
-                else:
-                    raise EmbeddingError(f"Google batch embedding failed: {error_str}") from e
-
-        raise EmbeddingQuotaError("Embedding provider quota is exhausted.")
-
-
 
 class JinaQuotaGovernor:
     def __init__(self, safe_tpm: int, safe_rpm: int):
@@ -280,127 +207,6 @@ class JinaEmbeddingProvider(EmbeddingProvider):
             raise EmbeddingError(f"Embedding dimension mismatch. Expected {EMBEDDING_DIMENSIONS}, got {len(emb)}")
         if not all(isinstance(x, (int, float)) for x in emb):
             raise EmbeddingError("Embedding must contain numeric values.")
-
-class GoogleEmbeddingProvider(EmbeddingProvider):
-    def __init__(self):
-        from google import genai
-        api_key = os.getenv("GEMINI_API_KEY", "dummy")
-        self.client = genai.Client(api_key=api_key)
-        self.provider_id = "google"
-        self.model_id = os.getenv("GOOGLE_EMBEDDING_MODEL", "gemini-embedding-001")
-        self.dimensions = EMBEDDING_DIMENSIONS
-
-    async def embed_query(self, text: str) -> List[float]:
-        from google.genai import types
-        try:
-            response = await self.client.aio.models.embed_content(
-                model=self.model_id,
-                contents=text,
-                config=types.EmbedContentConfig(output_dimensionality=EMBEDDING_DIMENSIONS)
-            )
-            if not response or not hasattr(response, 'embeddings') or not response.embeddings:
-                raise EmbeddingError("Invalid or empty response from Google API.")
-            emb = response.embeddings[0].values
-            self.validate_embedding(emb)
-            return emb
-        except Exception as e:
-            error_str = str(e)
-            if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-                logger.error("Embedding provider quota is exhausted.")
-                raise EmbeddingQuotaError("Embedding provider quota is exhausted.") from e
-            raise EmbeddingError(f"Google embedding failed: {error_str}") from e
-
-    async def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        from google.genai import types
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                response = await self.client.aio.models.embed_content(
-                    model=self.model_id,
-                    contents=texts,
-                    config=types.EmbedContentConfig(output_dimensionality=EMBEDDING_DIMENSIONS)
-                )
-
-                if not response or not hasattr(response, 'embeddings'):
-                    raise EmbeddingError("Invalid response from embedding API.")
-
-                if len(response.embeddings) != len(texts):
-                    raise EmbeddingError(f"Batch response count mismatch. Expected {len(texts)}, got {len(response.embeddings)}")
-
-                result = []
-                for emb_obj in response.embeddings:
-                    emb = emb_obj.values
-                    self.validate_embedding(emb)
-                    result.append(emb)
-
-                return result
-
-            except Exception as e:
-                if isinstance(e, EmbeddingError) and not isinstance(e, EmbeddingQuotaError):
-                    raise
-                error_str = str(e)
-                if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-                    if attempt < max_retries - 1:
-                        logger.warning(f"Embedding provider quota exhausted. Retrying in {2 ** attempt} seconds...")
-                        await asyncio.sleep(2 ** attempt)
-                        continue
-                    else:
-                        logger.error("Embedding provider quota is exhausted.")
-                        raise EmbeddingQuotaError("Embedding provider quota is exhausted.") from e
-                else:
-                    raise EmbeddingError(f"Google batch embedding failed: {error_str}") from e
-
-        raise EmbeddingQuotaError("Embedding provider quota is exhausted.")
-
-
-
-class JinaQuotaGovernor:
-    def __init__(self, safe_tpm: int, safe_rpm: int):
-        self.safe_tpm = safe_tpm
-        self.safe_rpm = safe_rpm
-        self.history = []
-        self.lock = asyncio.Lock()
-
-    def _clean(self, now: float):
-        cutoff = now - 60.0
-        self.history = [h for h in self.history if h['time'] > cutoff]
-
-    async def acquire(self, tokens: int):
-        if tokens > self.safe_tpm:
-            raise EmbeddingQuotaError(f"Request token estimation ({tokens}) exceeds safe TPM ceiling ({self.safe_tpm}).")
-
-        while True:
-            wait_time = 0.0
-            async with self.lock:
-                now = time.time()
-                self._clean(now)
-                current_tokens = sum(h['tokens'] for h in self.history)
-                current_reqs = len(self.history)
-
-                if current_reqs < self.safe_rpm and (current_tokens + tokens) <= self.safe_tpm:
-                    self.history.append({'time': now, 'tokens': tokens})
-                    return
-
-                if current_reqs >= self.safe_rpm:
-                    wait_time = max(0.1, self.history[0]['time'] + 60.0 - now)
-                else:
-                    needed = (current_tokens + tokens) - self.safe_tpm
-                    freed = 0
-                    wait_time = 0.1
-                    for h in self.history:
-                        freed += h['tokens']
-                        if freed >= needed:
-                            wait_time = max(0.1, h['time'] + 60.0 - now)
-                            break
-
-            if wait_time > 0:
-                await asyncio.sleep(wait_time)
-
-    async def record_actual(self, estimated: int, actual: int):
-        if actual > estimated:
-            async with self.lock:
-                now = time.time()
-                self.history.append({'time': now, 'tokens': actual - estimated})
 
 class JinaEmbeddingProvider(EmbeddingProvider):
     def __init__(self):
@@ -595,10 +401,10 @@ def get_embedding_provider() -> EmbeddingProvider:
     if _provider_instance is not None:
         return _provider_instance
 
-    if EMBEDDING_PROVIDER == "google":
-        _provider_instance = GoogleEmbeddingProvider()
-    elif EMBEDDING_PROVIDER == "jina":
+    if EMBEDDING_PROVIDER == "jina":
         _provider_instance = JinaEmbeddingProvider()
+    elif EMBEDDING_PROVIDER == "google":
+        raise EmbeddingConfigurationError("Google embedding provider is deprecated and removed. Please use 'jina'.")
     else:
         raise EmbeddingConfigurationError(f"Unknown EMBEDDING_PROVIDER: {EMBEDDING_PROVIDER}")
 

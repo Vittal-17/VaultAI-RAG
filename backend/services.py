@@ -96,8 +96,8 @@ async def process_and_store_document(filename: str, pdf_bytes: bytes, user_email
                 "text": chunk_info["text"],
                 "embedding": emb,
                 "user_email": user_email,
-                "embedding_provider": getattr(provider, "provider_id", "google"),
-                "embedding_model": getattr(provider, "model_id", "gemini-embedding-001"),
+                "embedding_provider": getattr(provider, "provider_id", "jina"),
+                "embedding_model": getattr(provider, "model_id", "jina-embeddings-v3"),
                 "embedding_dimensions": getattr(provider, "dimensions", 768)
             })
 

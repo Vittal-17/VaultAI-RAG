@@ -19,7 +19,7 @@ class TestCYPHRSecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         main.limiter._storage.reset()
         await embeddings.close_embedding_provider()
         self.original_provider = embeddings.EMBEDDING_PROVIDER
-        embeddings.EMBEDDING_PROVIDER = "google"
+        embeddings.EMBEDDING_PROVIDER = "jina"
 
     async def asyncTearDown(self):
         import embeddings
@@ -28,7 +28,7 @@ class TestCYPHRSecurityAndRAG(unittest.IsolatedAsyncioTestCase):
 
 
     @patch("services.collection")
-    @patch("embeddings.GoogleEmbeddingProvider.embed_query", new_callable=AsyncMock)
+    @patch("embeddings.JinaEmbeddingProvider.embed_query", new_callable=AsyncMock)
     @patch("services.gorouter_client.chat.completions.create", new_callable=AsyncMock)
     async def test_1_multi_tenant_isolation(self, mock_gorouter, mock_embed, mock_collection):
         """[1] Multi-Tenant Isolation Verification Test"""
@@ -55,7 +55,7 @@ class TestCYPHRSecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(vector_search_stage_beta["filter"]["user_email"], {"$eq": "user_beta@test.com"})
 
     @patch("services.collection")
-    @patch("embeddings.GoogleEmbeddingProvider.embed_query", new_callable=AsyncMock)
+    @patch("embeddings.JinaEmbeddingProvider.embed_query", new_callable=AsyncMock)
     @patch("services.gorouter_client.chat.completions.create", new_callable=AsyncMock)
     async def test_2_filename_aware_scoping(self, mock_gorouter, mock_embed, mock_collection):
         """[2] Filename-Aware Scoping Verification Test"""
@@ -78,7 +78,7 @@ class TestCYPHRSecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(vector_search_stage["filter"]["filename"], {"$eq": "testnewnewtestnew.pdf"})
 
     @patch("services.collection")
-    @patch("embeddings.GoogleEmbeddingProvider.embed_query", new_callable=AsyncMock)
+    @patch("embeddings.JinaEmbeddingProvider.embed_query", new_callable=AsyncMock)
     @patch("services.gorouter_client.chat.completions.create", new_callable=AsyncMock)
     async def test_3_metadata_page_fallback(self, mock_gorouter, mock_embed, mock_collection):
         """[3] Metadata Page Integrity & Fallback Test"""
@@ -100,7 +100,7 @@ class TestCYPHRSecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("(Page ?)", answer)
 
     @patch("services.collection")
-    @patch("embeddings.GoogleEmbeddingProvider.embed_query", new_callable=AsyncMock)
+    @patch("embeddings.JinaEmbeddingProvider.embed_query", new_callable=AsyncMock)
     @patch("services.gorouter_client.chat.completions.create", new_callable=AsyncMock)
     async def test_4_precision_citation_filtering(self, mock_gorouter, mock_embed, mock_collection):
         """[4] Post-LLM Precision Citation Filtering Test"""
@@ -300,7 +300,7 @@ class TestCYPHRSecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         self.assertIn("too many text chunks", response.json()["detail"])
 
     @patch('services.PdfReader')
-    @patch('embeddings.GoogleEmbeddingProvider.embed_documents', new_callable=AsyncMock)
+    @patch('embeddings.JinaEmbeddingProvider.embed_documents', new_callable=AsyncMock)
     def test_22_upload_embedding_failure(self, mock_embed, mock_pdfreader):
         """Embedding failure"""
         from main import get_current_user
@@ -322,7 +322,7 @@ class TestCYPHRSecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Timeout", response.json()["detail"])
 
     @patch('services.PdfReader')
-    @patch('embeddings.GoogleEmbeddingProvider.embed_documents', new_callable=AsyncMock)
+    @patch('embeddings.JinaEmbeddingProvider.embed_documents', new_callable=AsyncMock)
     @patch('services.collection.insert_many', new_callable=AsyncMock)
     def test_23_upload_mongodb_failure(self, mock_insert, mock_embed, mock_pdfreader):
         """MongoDB insertion failure"""
@@ -737,7 +737,7 @@ print(ACCESS_TOKEN_EXPIRE_MINUTES * 60)
         key_invalid = main.dynamic_key_func(req)
         self.assertEqual(key_invalid, "ip:9.9.9.9")
 
-    @patch("embeddings.GoogleEmbeddingProvider.embed_query", new_callable=AsyncMock)
+    @patch("embeddings.JinaEmbeddingProvider.embed_query", new_callable=AsyncMock)
     @patch("services.gorouter_client.chat.completions.create", new_callable=AsyncMock)
     async def test_40_patch_7b_async_embedding_used(self, mock_gorouter, mock_embed):
         """PATCH 7B: Verify async embedding and chat completion APIs are used"""
@@ -757,7 +757,7 @@ print(ACCESS_TOKEN_EXPIRE_MINUTES * 60)
             mock_gorouter.assert_called_once()
             self.assertIn("Async response", result)
 
-    @patch("embeddings.GoogleEmbeddingProvider.embed_documents", new_callable=AsyncMock)
+    @patch("embeddings.JinaEmbeddingProvider.embed_documents", new_callable=AsyncMock)
     @patch("services.collection.insert_many", new_callable=AsyncMock)
     async def test_41_patch_7c_batch_embedding(self, mock_insert, mock_embed):
         """PATCH 7C: Verify batching, mismatch handling, error abort, metadata, and async validity"""
@@ -868,89 +868,19 @@ class TestCYPHRPatch8A(unittest.IsolatedAsyncioTestCase):
         import embeddings
         await embeddings.close_embedding_provider()
         self.original_provider = embeddings.EMBEDDING_PROVIDER
-        embeddings.EMBEDDING_PROVIDER = "google"
+        embeddings.EMBEDDING_PROVIDER = "jina"
 
     async def asyncTearDown(self):
         import embeddings
         await embeddings.close_embedding_provider()
         embeddings.EMBEDDING_PROVIDER = self.original_provider
     async def test_patch_8a_test_a_default_provider(self):
-        """TEST A: Default configuration resolves to Google provider."""
-        from embeddings import get_embedding_provider, GoogleEmbeddingProvider, EMBEDDING_PROVIDER
+        """TEST A: Default configuration resolves to Jina provider."""
+        from embeddings import get_embedding_provider, JinaEmbeddingProvider, EMBEDDING_PROVIDER
         import embeddings
-        self.assertEqual(embeddings.EMBEDDING_PROVIDER, "google")
+        self.assertEqual(embeddings.EMBEDDING_PROVIDER, "jina")
         provider = get_embedding_provider()
-        self.assertIsInstance(provider, GoogleEmbeddingProvider)
-
-    async def test_patch_8a_test_b_single_query_validation(self):
-        """TEST B: Single query embedding returns a correctly validated vector."""
-        from embeddings import get_embedding_provider
-        provider = get_embedding_provider()
-        with patch.object(provider.client.aio.models, 'embed_content', new_callable=AsyncMock) as mock_api:
-            mock_resp = MagicMock()
-            mock_resp.embeddings = [MagicMock(values=[0.5]*768)]
-            mock_api.return_value = mock_resp
-            result = await provider.embed_query("test query")
-            self.assertEqual(result, [0.5]*768)
-
-    async def test_patch_8a_test_c_batch_order(self):
-        """TEST C: Batch document embeddings preserve exact order."""
-        from embeddings import get_embedding_provider
-        provider = get_embedding_provider()
-        with patch.object(provider.client.aio.models, 'embed_content', new_callable=AsyncMock) as mock_api:
-            mock_resp = MagicMock()
-            mock_resp.embeddings = [MagicMock(values=[0.1]*768), MagicMock(values=[0.2]*768)]
-            mock_api.return_value = mock_resp
-            result = await provider.embed_documents(["doc1", "doc2"])
-            self.assertEqual(result[0], [0.1]*768)
-            self.assertEqual(result[1], [0.2]*768)
-
-    async def test_patch_8a_test_d_mismatch_fails_safely(self):
-        """TEST D: Batch output count mismatch fails safely."""
-        from embeddings import get_embedding_provider, EmbeddingError
-        provider = get_embedding_provider()
-        with patch.object(provider.client.aio.models, 'embed_content', new_callable=AsyncMock) as mock_api:
-            mock_resp = MagicMock()
-            # 2 inputs, but return only 1 embedding
-            mock_resp.embeddings = [MagicMock(values=[0.1]*768)]
-            mock_api.return_value = mock_resp
-            with self.assertRaises(EmbeddingError) as ctx:
-                await provider.embed_documents(["doc1", "doc2"])
-            self.assertIn("mismatch", str(ctx.exception))
-
-    async def test_patch_8a_test_e_invalid_dimensionality(self):
-        """TEST E: Invalid embedding dimensionality fails safely."""
-        from embeddings import get_embedding_provider, EmbeddingError
-        provider = get_embedding_provider()
-        with patch.object(provider.client.aio.models, 'embed_content', new_callable=AsyncMock) as mock_api:
-            mock_resp = MagicMock()
-            # Return 5 dimensions instead of 768
-            mock_resp.embeddings = [MagicMock(values=[0.1]*5)]
-            mock_api.return_value = mock_resp
-            with self.assertRaises(EmbeddingError) as ctx:
-                await provider.embed_query("query")
-            self.assertIn("dimension mismatch", str(ctx.exception))
-
-    async def test_patch_8a_test_f_empty_response(self):
-        """TEST F: Empty embedding response fails safely."""
-        from embeddings import get_embedding_provider, EmbeddingError
-        provider = get_embedding_provider()
-        with patch.object(provider.client.aio.models, 'embed_content', new_callable=AsyncMock) as mock_api:
-            mock_resp = MagicMock()
-            mock_resp.embeddings = []
-            mock_api.return_value = mock_resp
-            with self.assertRaises(EmbeddingError) as ctx:
-                await provider.embed_query("query")
-
-    async def test_patch_8a_test_g_quota_exhausted(self):
-        """TEST G: Google 429 RESOURCE_EXHAUSTED maps to EmbeddingQuotaError."""
-        from embeddings import get_embedding_provider, EmbeddingQuotaError
-        provider = get_embedding_provider()
-        with patch.object(provider.client.aio.models, 'embed_content', new_callable=AsyncMock) as mock_api:
-            mock_api.side_effect = Exception("429 Quota exceeded for aiplatform.googleapis.com/global_embed_content_requests_per_minute_per_base_model")
-            with self.assertRaises(EmbeddingQuotaError) as ctx:
-                await provider.embed_query("query")
-            self.assertIn("quota is exhausted", str(ctx.exception))
+        self.assertIsInstance(provider, JinaEmbeddingProvider)
 
     async def test_patch_8a_test_h_unknown_provider(self):
         """TEST H: Unknown EMBEDDING_PROVIDER raises EmbeddingConfigurationError."""
@@ -974,14 +904,13 @@ class TestCYPHRPatch8A(unittest.IsolatedAsyncioTestCase):
         p2 = get_embedding_provider()
         self.assertIs(p1, p2)
 
-    async def test_patch_8a_test_j_backward_compatibility(self):
-        """TEST J: Existing default configuration remains backward compatible with gemini-embedding-001 and 768 dimensions."""
-        from embeddings import EMBEDDING_DIMENSIONS
-        from embeddings import get_embedding_provider
-        p = get_embedding_provider()
-        self.assertEqual(getattr(p, "model_id", ""), "gemini-embedding-001")
-        self.assertEqual(EMBEDDING_DIMENSIONS, 768)
-
+    async def test_patch_8a_test_j_legacy_google_provider_rejected(self):
+        """Legacy Google embedding configuration is explicitly rejected after Jina cutover."""
+        import embeddings
+        embeddings.EMBEDDING_PROVIDER = "google"
+        embeddings._provider_instance = None
+        with self.assertRaises(embeddings.EmbeddingConfigurationError):
+            embeddings.get_embedding_provider()
     async def test_patch_8a_test_k_l_m_integration(self):
         """TEST K, L, M: Document processing, Chat query use central abstraction, No insert on failure."""
         from services import process_and_store_document, generate_chat_response
@@ -994,8 +923,8 @@ class TestCYPHRPatch8A(unittest.IsolatedAsyncioTestCase):
         writer.write(pdf_bytes)
 
         with patch("services.extract_text_from_pdf") as mock_extract, \
-             patch("embeddings.GoogleEmbeddingProvider.embed_documents", new_callable=AsyncMock) as mock_embed_docs, \
-             patch("embeddings.GoogleEmbeddingProvider.embed_query", new_callable=AsyncMock) as mock_embed_query, \
+             patch("embeddings.JinaEmbeddingProvider.embed_documents", new_callable=AsyncMock) as mock_embed_docs, \
+             patch("embeddings.JinaEmbeddingProvider.embed_query", new_callable=AsyncMock) as mock_embed_query, \
              patch("services.collection.insert_many", new_callable=AsyncMock) as mock_insert, \
              patch("services.collection.distinct", new_callable=AsyncMock, return_value=["test.pdf"]), \
              patch("services.collection.aggregate") as mock_aggregate, \
@@ -1017,7 +946,7 @@ class TestCYPHRPatch8A(unittest.IsolatedAsyncioTestCase):
             mock_embed_docs.assert_called_once()  # TEST K
             mock_insert.assert_called_once()
             inserted_doc = mock_insert.call_args[0][0][0]
-            self.assertEqual(inserted_doc["embedding_provider"], "google")
+            self.assertEqual(inserted_doc["embedding_provider"], "jina")
 
             # L
             mock_embed_query.return_value = [0.8]*768
@@ -1053,13 +982,13 @@ class TestCYPHRPatch8B2(unittest.IsolatedAsyncioTestCase):
         else:
             os.environ["JINA_API_KEY"] = self.original_key
 
-    async def test_patch_8b2_test_a_default_google(self):
-        """TEST A: Default provider remains Google."""
+    async def test_patch_8b2_test_a_default_jina(self):
+        """TEST A: Default provider remains Jina."""
         import embeddings
         await embeddings.close_embedding_provider()
-        embeddings.EMBEDDING_PROVIDER = "google"
+        embeddings.EMBEDDING_PROVIDER = "jina"
         provider = embeddings.get_embedding_provider()
-        self.assertIsInstance(provider, embeddings.GoogleEmbeddingProvider)
+        self.assertIsInstance(provider, embeddings.JinaEmbeddingProvider)
 
     async def test_patch_8b2_test_b_resolves_jina(self):
         """TEST B: EMBEDDING_PROVIDER=jina resolves to JinaEmbeddingProvider."""
@@ -1297,17 +1226,6 @@ class TestCYPHRPatch8B2(unittest.IsolatedAsyncioTestCase):
         p2 = embeddings.get_embedding_provider()
         self.assertIsNot(p1, p2)
 
-    async def test_patch_8b2_test_u_google_regression(self):
-        """TEST U: Google provider regression compatibility remains intact."""
-        import embeddings
-        await embeddings.close_embedding_provider()
-        embeddings.EMBEDDING_PROVIDER = "google"
-        p = embeddings.get_embedding_provider()
-        self.assertIsInstance(p, embeddings.GoogleEmbeddingProvider)
-        # Verify it still has the expected google methods
-        self.assertTrue(hasattr(p, 'embed_query'))
-        self.assertTrue(hasattr(p, 'embed_documents'))
-
     async def test_patch_8b2_test_v_service_agnostic(self):
         """TEST V: Service integration remains provider-agnostic."""
         import services
@@ -1344,15 +1262,6 @@ class TestCYPHRPatch8B2(unittest.IsolatedAsyncioTestCase):
         inserted_doc = mock_insert.call_args[0][0][0]
         self.assertEqual(inserted_doc["embedding_provider"], "jina")
         self.assertEqual(inserted_doc["embedding_dimensions"], 768)
-
-    async def test_patch_8b2_model_default_google(self):
-        """1. Google provider uses gemini-embedding-001 by default."""
-        import embeddings
-        await embeddings.close_embedding_provider()
-        embeddings.EMBEDDING_PROVIDER = "google"
-        os.environ.pop("GOOGLE_EMBEDDING_MODEL", None)
-        p = embeddings.get_embedding_provider()
-        self.assertEqual(p.model_id, "gemini-embedding-001")
 
     async def test_patch_8b2_model_default_jina(self):
         """2. Jina provider uses jina-embeddings-v3 by default."""
@@ -1400,25 +1309,6 @@ class TestCYPHRPatch8B2(unittest.IsolatedAsyncioTestCase):
 
         called_json = mock_post.call_args[1]["json"]
         self.assertEqual(called_json["model"], "jina-custom-model")
-        os.environ.pop("JINA_EMBEDDING_MODEL", None)
-
-    async def test_patch_8b2_model_namespaces(self):
-        """5. Google and Jina model namespaces cannot accidentally leak into each other."""
-        import embeddings
-        os.environ["GOOGLE_EMBEDDING_MODEL"] = "google-leak-model"
-        os.environ["JINA_EMBEDDING_MODEL"] = "jina-leak-model"
-
-        await embeddings.close_embedding_provider()
-        embeddings.EMBEDDING_PROVIDER = "google"
-        pg = embeddings.get_embedding_provider()
-        self.assertEqual(pg.model_id, "google-leak-model")
-
-        await embeddings.close_embedding_provider()
-        embeddings.EMBEDDING_PROVIDER = "jina"
-        pj = embeddings.get_embedding_provider()
-        self.assertEqual(pj.model_id, "jina-leak-model")
-
-        os.environ.pop("GOOGLE_EMBEDDING_MODEL", None)
         os.environ.pop("JINA_EMBEDDING_MODEL", None)
 
     @patch("httpx.AsyncClient.post")
@@ -1842,15 +1732,6 @@ class TestCYPHRPatch8C(unittest.IsolatedAsyncioTestCase):
         import inspect
         src = inspect.getsource(embeddings)
         self.assertNotIn("time.sleep", src)
-
-    async def test_patch_8c_test_w_google_untouched(self):
-        """TEST W: Google provider behavior remains unaffected."""
-        import embeddings
-        await embeddings.close_embedding_provider()
-        embeddings.EMBEDDING_PROVIDER = "google"
-        p = embeddings.get_embedding_provider()
-        self.assertIsInstance(p, embeddings.GoogleEmbeddingProvider)
-        self.assertFalse(hasattr(p, "quota_governor"))
 
     async def test_patch_8c_test_x_large_doc_sim(self):
         """Realistic large document simulation with 2,000 chunks."""
