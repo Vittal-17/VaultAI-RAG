@@ -13,6 +13,13 @@ from services import generate_chat_response
 client = TestClient(app)
 
 class TestCYPHRSecurityAndRAG(unittest.IsolatedAsyncioTestCase):
+
+    def test_patch_8f_health_check(self):
+        """PATCH 8F: Verify /health endpoint returns 200 OK and no secrets."""
+        response = client.get("/health")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "ok", "service": "CYPHR-RAG"})
+
     async def asyncSetUp(self):
         import embeddings
         import main

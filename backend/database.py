@@ -8,6 +8,8 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 MONGODB_URI = os.getenv("MONGODB_URI")
+if not MONGODB_URI:
+    raise ValueError("FATAL: MONGODB_URI environment variable is not set!")
 DB_NAME = os.getenv("MONGODB_DB_NAME", "vault_ai")
 COLLECTION_NAME = os.getenv("MONGODB_COLLECTION_NAME", "documents")
 
@@ -23,3 +25,4 @@ async def check_db_connection():
         logger.info("Successfully connected to MongoDB Atlas!")
     except Exception as e:
         logger.exception("Error connecting to MongoDB Atlas")
+        raise RuntimeError("FATAL: Could not connect to MongoDB") from e

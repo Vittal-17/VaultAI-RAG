@@ -17,8 +17,12 @@ logger = logging.getLogger(__name__)
 
 load_dotenv()
 
+GOROUTER_API_KEY = os.getenv("GOROUTER_API_KEY")
+if not GOROUTER_API_KEY:
+    raise ValueError("FATAL: GOROUTER_API_KEY environment variable is not set!")
+
 gorouter_client = AsyncOpenAI(
-    api_key=os.getenv("GOROUTER_API_KEY"),
+    api_key=GOROUTER_API_KEY,
     base_url="https://gorouter.app/v1",
 )
 MAX_PDF_PAGES = int(os.getenv("MAX_PDF_PAGES", 200))

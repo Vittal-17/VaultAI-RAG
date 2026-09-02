@@ -98,6 +98,10 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"detail": "Internal server error. Please try again later."}
     )
 
+@app.get("/health", tags=["System"])
+async def health_check():
+    return {"status": "ok", "service": "CYPHR-RAG"}
+
 # Read environment variables
 IS_PRODUCTION = os.getenv("ENVIRONMENT") == "production"
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
@@ -108,7 +112,12 @@ if COOKIE_SAMESITE not in ["lax", "strict", "none"]:
 if COOKIE_SAMESITE == "none" and not IS_PRODUCTION:
     COOKIE_SAMESITE = "lax"
 
-ALLOWED_ORIGIN = os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip('/')
+ALLOWED_ORIGIN = os.getenv("FRONTEND_URL")
+if not ALLOWED_ORIGIN:
+    if IS_PRODUCTION:
+        raise ValueError("FATAL: FRONTEND_URL environment variable must be set in production")
+    ALLOWED_ORIGIN = "http://localhost:5173"
+ALLOWED_ORIGIN = ALLOWED_ORIGIN.rstrip('/')
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
@@ -507,4 +516,4 @@ async def chat(request: Request, body_req: ChatRequest, current_user: dict = Dep
         raise HTTPException(status_code=500, detail="Failed to generate response. Please try again.")
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, proxy_headers=True, forwarded_allow_ips=os.getenv("FORWARDED_ALLOW_IPS", "127.0.0.1"))
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=not IS_PRODUCTION, proxy_headers=True, forwarded_allow_ips=os.getenv("FORWARDED_ALLOW_IPS", "127.0.0.1"))
