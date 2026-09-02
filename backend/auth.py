@@ -12,6 +12,10 @@ SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 if not SECRET_KEY:
     raise ValueError("FATAL: JWT_SECRET_KEY environment variable is not set!")
 
+IS_PRODUCTION = os.getenv("ENVIRONMENT") == "production"
+if IS_PRODUCTION and len(SECRET_KEY) < 32:
+    raise ValueError("FATAL: JWT_SECRET_KEY must be at least 32 characters long in production")
+
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = 1440
 

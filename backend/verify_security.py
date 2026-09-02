@@ -14,6 +14,37 @@ client = TestClient(app)
 
 class TestCYPHRSecurityAndRAG(unittest.IsolatedAsyncioTestCase):
 
+    async def test_patch_9_jwt_length(self):
+        """PATCH 9: Verify JWT_SECRET_KEY must be >= 32 chars in production."""
+        import auth
+        import os
+        import importlib
+
+        old_env = os.environ.get("ENVIRONMENT")
+        old_key = os.environ.get("JWT_SECRET_KEY")
+
+        try:
+            os.environ["ENVIRONMENT"] = "production"
+            os.environ["JWT_SECRET_KEY"] = "short"
+
+            with self.assertRaises(ValueError) as context:
+                importlib.reload(auth)
+
+            self.assertIn("must be at least 32 characters", str(context.exception))
+        finally:
+            if old_env is None:
+                os.environ.pop("ENVIRONMENT", None)
+            else:
+                os.environ["ENVIRONMENT"] = old_env
+
+            if old_key is None:
+                os.environ.pop("JWT_SECRET_KEY", None)
+            else:
+                os.environ["JWT_SECRET_KEY"] = old_key
+
+            importlib.reload(auth)
+
+
     def test_patch_8f_health_check(self):
         """PATCH 8F: Verify /health endpoint returns 200 OK and no secrets."""
         response = client.get("/health")
@@ -604,6 +635,8 @@ print(main.COOKIE_SAMESITE)
 import os
 os.environ['COOKIE_SAMESITE'] = 'none'
 os.environ['ENVIRONMENT'] = 'production'
+os.environ['FRONTEND_URL'] = 'https://example.com'
+os.environ['JWT_SECRET_KEY'] = 'A'*32
 import main
 print(main.COOKIE_SAMESITE)
 print(main.IS_PRODUCTION)
