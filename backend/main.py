@@ -106,7 +106,11 @@ async def health_check():
 IS_PRODUCTION = os.getenv("ENVIRONMENT") == "production"
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 
-COOKIE_SAMESITE = os.getenv("COOKIE_SAMESITE", "lax").lower()
+if IS_PRODUCTION:
+    COOKIE_SAMESITE = os.getenv("COOKIE_SAMESITE", "none").lower()
+else:
+    COOKIE_SAMESITE = os.getenv("COOKIE_SAMESITE", "lax").lower()
+
 if COOKIE_SAMESITE not in ["lax", "strict", "none"]:
     raise ValueError("COOKIE_SAMESITE must be 'lax', 'strict', or 'none'")
 if COOKIE_SAMESITE == "none" and not IS_PRODUCTION:

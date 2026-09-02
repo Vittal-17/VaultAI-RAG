@@ -14,6 +14,35 @@ client = TestClient(app)
 
 class TestCYPHRSecurityAndRAG(unittest.IsolatedAsyncioTestCase):
 
+    def test_patch_9_production_csrf_cookie(self):
+        """PATCH 9: Verify ACTUAL emitted CSRF Set-Cookie header in production contains Secure and SameSite=None."""
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        backend_dir = str(Path(__file__).resolve().parent)
+        script = """
+import os
+if 'COOKIE_SAMESITE' in os.environ: del os.environ['COOKIE_SAMESITE']
+os.environ['ENVIRONMENT'] = 'production'
+os.environ['FRONTEND_URL'] = 'https://example.com'
+os.environ['JWT_SECRET_KEY'] = 'A'*32
+import main
+from fastapi.testclient import TestClient
+
+client = TestClient(main.app)
+response = client.get('/api/csrf')
+set_cookie = response.headers.get('set-cookie', '')
+print("SET_COOKIE:", set_cookie)
+"""
+        env = os.environ.copy()
+        if 'COOKIE_SAMESITE' in env: del env['COOKIE_SAMESITE']
+        result = subprocess.run([sys.executable, '-c', script], capture_output=True, text=True, cwd=backend_dir, env=env)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("Secure", result.stdout)
+        self.assertIn("samesite=none", result.stdout.lower())
+
+
     async def test_patch_9_jwt_length(self):
         """PATCH 9: Verify JWT_SECRET_KEY must be >= 32 chars in production."""
         import auth
@@ -633,7 +662,7 @@ print(main.COOKIE_SAMESITE)
 
         script3 = """
 import os
-os.environ['COOKIE_SAMESITE'] = 'none'
+if 'COOKIE_SAMESITE' in os.environ: del os.environ['COOKIE_SAMESITE']
 os.environ['ENVIRONMENT'] = 'production'
 os.environ['FRONTEND_URL'] = 'https://example.com'
 os.environ['JWT_SECRET_KEY'] = 'A'*32
@@ -641,10 +670,16 @@ import main
 print(main.COOKIE_SAMESITE)
 print(main.IS_PRODUCTION)
 """
-        result3 = subprocess.run([sys.executable, '-c', script3], capture_output=True, text=True, cwd=backend_dir)
+        # Ensure we don't pass the parent's COOKIE_SAMESITE explicitly
+        env = os.environ.copy()
+        if 'COOKIE_SAMESITE' in env: del env['COOKIE_SAMESITE']
+        result3 = subprocess.run([sys.executable, '-c', script3], capture_output=True, text=True, cwd=backend_dir, env=env)
         self.assertEqual(result3.returncode, 0)
         self.assertIn('none', result3.stdout)
         self.assertIn('True', result3.stdout)
+
+
+
 
     def test_33_logout_cookie_deletion(self):
         # 5. LOGOUT COOKIE DELETION
