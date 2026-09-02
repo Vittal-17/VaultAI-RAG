@@ -1,3 +1,4 @@
+import config
 import unittest
 from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi.testclient import TestClient
@@ -8,7 +9,7 @@ import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from main import app
-from services import generate_chat_response
+from services import generate_chat_response, generate_auto_title
 
 client = TestClient(app)
 
@@ -96,7 +97,7 @@ print("SET_COOKIE:", set_cookie)
 
     @patch("services.collection")
     @patch("embeddings.JinaEmbeddingProvider.embed_query", new_callable=AsyncMock)
-    @patch("services.gorouter_client.chat.completions.create", new_callable=AsyncMock)
+    @patch("services.get_provider_client")
     async def test_1_multi_tenant_isolation(self, mock_gorouter, mock_embed, mock_collection):
         """[1] Multi-Tenant Isolation Verification Test"""
         mock_embed.return_value = [[0.1]*768] if "documents" in str(mock_embed) else [0.1]*768
@@ -107,7 +108,11 @@ print("SET_COOKIE:", set_cookie)
 
         mock_llm_response = MagicMock()
         mock_llm_response.choices = [MagicMock(message=MagicMock(content="Mocked answer"))]
-        mock_gorouter.return_value = mock_llm_response
+        mock_client = __import__('unittest').mock.MagicMock()
+
+        mock_client.chat.completions.create = __import__('unittest').mock.AsyncMock(return_value=mock_llm_response)
+
+        mock_gorouter.return_value = (mock_client, 'gorouter', 'claude-opus-5')
 
         # Run test for alpha
         await generate_chat_response("Hello", "user_alpha@test.com")
@@ -123,7 +128,7 @@ print("SET_COOKIE:", set_cookie)
 
     @patch("services.collection")
     @patch("embeddings.JinaEmbeddingProvider.embed_query", new_callable=AsyncMock)
-    @patch("services.gorouter_client.chat.completions.create", new_callable=AsyncMock)
+    @patch("services.get_provider_client")
     async def test_2_filename_aware_scoping(self, mock_gorouter, mock_embed, mock_collection):
         """[2] Filename-Aware Scoping Verification Test"""
         mock_embed.return_value = [[0.1]*768] if "documents" in str(mock_embed) else [0.1]*768
@@ -134,7 +139,11 @@ print("SET_COOKIE:", set_cookie)
 
         mock_llm_response = MagicMock()
         mock_llm_response.choices = [MagicMock(message=MagicMock(content="Mocked answer"))]
-        mock_gorouter.return_value = mock_llm_response
+        mock_client = __import__('unittest').mock.MagicMock()
+
+        mock_client.chat.completions.create = __import__('unittest').mock.AsyncMock(return_value=mock_llm_response)
+
+        mock_gorouter.return_value = (mock_client, 'gorouter', 'claude-opus-5')
 
         await generate_chat_response("Summarize testnewnewtestnew.pdf please", "user@test.com")
 
@@ -146,7 +155,7 @@ print("SET_COOKIE:", set_cookie)
 
     @patch("services.collection")
     @patch("embeddings.JinaEmbeddingProvider.embed_query", new_callable=AsyncMock)
-    @patch("services.gorouter_client.chat.completions.create", new_callable=AsyncMock)
+    @patch("services.get_provider_client")
     async def test_3_metadata_page_fallback(self, mock_gorouter, mock_embed, mock_collection):
         """[3] Metadata Page Integrity & Fallback Test"""
         mock_embed.return_value = [[0.1]*768] if "documents" in str(mock_embed) else [0.1]*768
@@ -159,7 +168,11 @@ print("SET_COOKIE:", set_cookie)
 
         mock_llm_response = MagicMock()
         mock_llm_response.choices = [MagicMock(message=MagicMock(content="Here is the info."))]
-        mock_gorouter.return_value = mock_llm_response
+        mock_client = __import__('unittest').mock.MagicMock()
+
+        mock_client.chat.completions.create = __import__('unittest').mock.AsyncMock(return_value=mock_llm_response)
+
+        mock_gorouter.return_value = (mock_client, 'gorouter', 'claude-opus-5')
 
         answer = await generate_chat_response("query", "user@test.com")
 
@@ -168,7 +181,7 @@ print("SET_COOKIE:", set_cookie)
 
     @patch("services.collection")
     @patch("embeddings.JinaEmbeddingProvider.embed_query", new_callable=AsyncMock)
-    @patch("services.gorouter_client.chat.completions.create", new_callable=AsyncMock)
+    @patch("services.get_provider_client")
     async def test_4_precision_citation_filtering(self, mock_gorouter, mock_embed, mock_collection):
         """[4] Post-LLM Precision Citation Filtering Test"""
         mock_embed.return_value = [[0.1]*768] if "documents" in str(mock_embed) else [0.1]*768
@@ -183,7 +196,11 @@ print("SET_COOKIE:", set_cookie)
 
         mock_llm_response = MagicMock()
         mock_llm_response.choices = [MagicMock(message=MagicMock(content="Based on file3.pdf, here is the result."))]
-        mock_gorouter.return_value = mock_llm_response
+        mock_client = __import__('unittest').mock.MagicMock()
+
+        mock_client.chat.completions.create = __import__('unittest').mock.AsyncMock(return_value=mock_llm_response)
+
+        mock_gorouter.return_value = (mock_client, 'gorouter', 'claude-opus-5')
 
         answer = await generate_chat_response("query", "user@test.com")
 
@@ -813,14 +830,18 @@ print(ACCESS_TOKEN_EXPIRE_MINUTES * 60)
         self.assertEqual(key_invalid, "ip:9.9.9.9")
 
     @patch("embeddings.JinaEmbeddingProvider.embed_query", new_callable=AsyncMock)
-    @patch("services.gorouter_client.chat.completions.create", new_callable=AsyncMock)
+    @patch("services.get_provider_client")
     async def test_40_patch_7b_async_embedding_used(self, mock_gorouter, mock_embed):
         """PATCH 7B: Verify async embedding and chat completion APIs are used"""
-        from services import generate_chat_response
+        from services import generate_chat_response, generate_auto_title
         mock_embed.return_value = [0.9]*768
         mock_gorouter_response = MagicMock()
         mock_gorouter_response.choices = [MagicMock(message=MagicMock(content="Async response"))]
-        mock_gorouter.return_value = mock_gorouter_response
+        mock_client = __import__('unittest').mock.MagicMock()
+
+        mock_client.chat.completions.create = __import__('unittest').mock.AsyncMock(return_value=mock_gorouter_response)
+
+        mock_gorouter.return_value = (mock_client, 'gorouter', 'claude-opus-5')
         with patch("services.collection.distinct", new_callable=AsyncMock, return_value=["test.pdf"]), \
              patch("services.collection.aggregate") as mock_aggregate:
             mock_cursor = AsyncMock()
@@ -1003,7 +1024,7 @@ class TestCYPHRPatch8A(unittest.IsolatedAsyncioTestCase):
              patch("services.collection.insert_many", new_callable=AsyncMock) as mock_insert, \
              patch("services.collection.distinct", new_callable=AsyncMock, return_value=["test.pdf"]), \
              patch("services.collection.aggregate") as mock_aggregate, \
-             patch("services.gorouter_client.chat.completions.create", new_callable=AsyncMock) as mock_gorouter:
+             patch("services.get_provider_client") as mock_gorouter:
 
             # K & M
             mock_extract.return_value = [{"page": 1, "text": "Doc content"}]
@@ -1027,7 +1048,11 @@ class TestCYPHRPatch8A(unittest.IsolatedAsyncioTestCase):
             mock_embed_query.return_value = [0.8]*768
             mock_gorouter_response = MagicMock()
             mock_gorouter_response.choices = [MagicMock(message=MagicMock(content="Answer"))]
-            mock_gorouter.return_value = mock_gorouter_response
+            mock_client = __import__('unittest').mock.MagicMock()
+
+            mock_client.chat.completions.create = __import__('unittest').mock.AsyncMock(return_value=mock_gorouter_response)
+
+            mock_gorouter.return_value = (mock_client, 'gorouter', 'claude-opus-5')
 
             mock_cursor = AsyncMock()
             mock_cursor.to_list = AsyncMock(return_value=[{"filename": "test.pdf", "page": 1, "text": "async data"}])
@@ -2081,6 +2106,188 @@ class TestCYPHRPatch8CCorrection(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(mock_post.call_count, 3)
         finally:
             embeddings.EMBEDDING_BATCH_SIZE = original_batch_size
+
+import importlib
+class TestRuntimeRouting(unittest.IsolatedAsyncioTestCase):
+    @patch("services.get_embedding_provider")
+    @patch("services.collection.distinct")
+    @patch("services.collection.aggregate")
+    @patch("llm_providers.AsyncOpenAI")
+    async def test_runtime_routing_gorouter(self, mock_openai_cls, mock_agg, mock_distinct, mock_jina):
+        mock_jina.return_value.embed_query = AsyncMock(return_value=[0.1]*768)
+        import llm_providers
+        llm_providers._client_cache.clear()
+
+        mock_instance = MagicMock()
+        mock_openai_cls.return_value = mock_instance
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content="Gorouter Response"))]
+        mock_instance.chat.completions.create = AsyncMock(return_value=mock_response)
+
+        mock_agg.return_value.to_list = AsyncMock(return_value=[{"filename": "test.pdf", "page": 1, "text": "hello"}])
+        mock_distinct.return_value = ["test.pdf"]; mock_distinct.side_effect = AsyncMock(return_value=["test.pdf"])
+
+        with patch.dict(os.environ, {"LLM_GOROUTER_ENABLED": "true", "GOROUTER_API_KEY": "fake"}, clear=False):
+
+            res = await generate_chat_response("query", "user@test.com", "gorouter", "claude-opus-5")
+
+            mock_openai_cls.assert_called_with(api_key="fake", base_url="https://gorouter.app/v1")
+            mock_instance.chat.completions.create.assert_called_once()
+            _, kwargs = mock_instance.chat.completions.create.call_args
+            self.assertEqual(kwargs["model"], "claude-opus-5")
+
+    @patch("services.get_embedding_provider")
+    @patch("services.collection.distinct")
+    @patch("services.collection.aggregate")
+    @patch("llm_providers.AsyncOpenAI")
+    async def test_runtime_routing_groq_120b(self, mock_openai_cls, mock_agg, mock_distinct, mock_jina):
+        mock_jina.return_value.embed_query = AsyncMock(return_value=[0.1]*768)
+        import llm_providers
+        llm_providers._client_cache.clear()
+
+        mock_instance = MagicMock()
+        mock_openai_cls.return_value = mock_instance
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content="Groq Response"))]
+        mock_instance.chat.completions.create = AsyncMock(return_value=mock_response)
+
+        mock_agg.return_value.to_list = AsyncMock(return_value=[])
+        mock_distinct.side_effect = AsyncMock(return_value=[])
+
+        with patch.dict(os.environ, {"LLM_GROQ_ENABLED": "true", "GROQ_API_KEY": "fake_groq"}, clear=False):
+
+            res = await generate_chat_response("query", "user@test.com", "groq", "openai/gpt-oss-120b")
+
+            mock_openai_cls.assert_called_with(api_key="fake_groq", base_url="https://api.groq.com/openai/v1")
+            mock_instance.chat.completions.create.assert_called_once()
+            _, kwargs = mock_instance.chat.completions.create.call_args
+            self.assertEqual(kwargs["model"], "openai/gpt-oss-120b")
+
+    @patch("services.get_embedding_provider")
+    @patch("services.collection.distinct")
+    @patch("services.collection.aggregate")
+    @patch("llm_providers.AsyncOpenAI")
+    async def test_runtime_routing_groq_20b(self, mock_openai_cls, mock_agg, mock_distinct, mock_jina):
+        mock_jina.return_value.embed_query = AsyncMock(return_value=[0.1]*768)
+        import llm_providers
+        llm_providers._client_cache.clear()
+
+        mock_instance = MagicMock()
+        mock_openai_cls.return_value = mock_instance
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content="Groq Response"))]
+        mock_instance.chat.completions.create = AsyncMock(return_value=mock_response)
+
+        mock_agg.return_value.to_list = AsyncMock(return_value=[])
+        mock_distinct.side_effect = AsyncMock(return_value=[])
+
+        with patch.dict(os.environ, {"LLM_GROQ_ENABLED": "true", "GROQ_API_KEY": "fake_groq"}, clear=False):
+
+            res = await generate_chat_response("query", "user@test.com", "groq", "openai/gpt-oss-20b")
+
+            mock_openai_cls.assert_called_with(api_key="fake_groq", base_url="https://api.groq.com/openai/v1")
+            mock_instance.chat.completions.create.assert_called_once()
+            _, kwargs = mock_instance.chat.completions.create.call_args
+            self.assertEqual(kwargs["model"], "openai/gpt-oss-20b")
+
+    @patch("llm_providers.AsyncOpenAI")
+    async def test_auto_title_routing(self, mock_openai_cls):
+        import llm_providers
+        llm_providers._client_cache.clear()
+
+        mock_instance = MagicMock()
+        mock_openai_cls.return_value = mock_instance
+
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content="My Title"))]
+        mock_instance.chat.completions.create = AsyncMock(return_value=mock_response)
+
+        with patch.dict(os.environ, {"LLM_GROQ_ENABLED": "true", "GROQ_API_KEY": "fake_groq"}, clear=False):
+
+            title = await generate_auto_title("hello", "groq", "openai/gpt-oss-120b")
+
+            mock_openai_cls.assert_called_with(api_key="fake_groq", base_url="https://api.groq.com/openai/v1")
+            mock_instance.chat.completions.create.assert_called_once()
+            _, kwargs = mock_instance.chat.completions.create.call_args
+            self.assertEqual(kwargs["model"], "openai/gpt-oss-120b")
+            self.assertEqual(title, "My Title")
+
+
+class TestProviderRegistry(unittest.TestCase):
+    def test_dotenv_loaded_before_providers(self):
+        import ast
+        with open("main.py", "r") as f:
+            tree = ast.parse(f.read())
+        config_idx = -1
+        llm_idx = -1
+        for i, node in enumerate(tree.body):
+            if isinstance(node, ast.Import):
+                for name in node.names:
+                    if name.name == "config":
+                        config_idx = i
+            elif isinstance(node, ast.ImportFrom):
+                if node.module == "llm_providers":
+                    llm_idx = i
+        self.assertTrue(config_idx != -1, "config must be imported in main.py")
+        self.assertTrue(llm_idx != -1, "llm_providers must be imported in main.py")
+        self.assertTrue(config_idx < llm_idx, "config must be imported BEFORE llm_providers in main.py to load .env first")
+
+    def test_provider_catalog_exposes_defaults(self):
+        from llm_providers import get_public_provider_catalog
+        data = get_public_provider_catalog()
+        self.assertIn("providers", data)
+        self.assertIn("default_provider", data)
+        self.assertIn("default_model", data)
+        self.assertEqual(data["default_provider"], "gorouter")
+        self.assertEqual(data["default_model"], "claude-opus-5")
+
+    @patch.dict(os.environ, {"GROQ_API_KEY": "fake", "GOROUTER_API_KEY": "fake", "JINA_API_KEY": "fake"})
+    def test_gorouter_selects_gorouter_client(self):
+        import importlib
+        import llm_providers
+        importlib.reload(llm_providers)
+        client, p_id, m_id = llm_providers.get_provider_client("gorouter", "claude-opus-5")
+        self.assertEqual(p_id, "gorouter")
+        self.assertEqual(m_id, "claude-opus-5")
+        self.assertIn("gorouter.app", client.base_url.host)
+
+    @patch.dict(os.environ, {"GROQ_API_KEY": "fake", "GOROUTER_API_KEY": "fake", "JINA_API_KEY": "fake"})
+    def test_groq_20b_selects_groq_client(self):
+        import importlib
+        import llm_providers
+        importlib.reload(llm_providers)
+        client, p_id, m_id = llm_providers.get_provider_client("groq", "openai/gpt-oss-20b")
+        self.assertEqual(p_id, "groq")
+        self.assertEqual(m_id, "openai/gpt-oss-20b")
+        self.assertIn("api.groq.com", client.base_url.host)
+
+    @patch.dict(os.environ, {"GROQ_API_KEY": "fake", "GOROUTER_API_KEY": "fake", "JINA_API_KEY": "fake"})
+    def test_omitted_provider_uses_defaults(self):
+        import importlib
+        import llm_providers
+        importlib.reload(llm_providers)
+        client, p_id, m_id = llm_providers.get_provider_client(None, None)
+        self.assertEqual(p_id, "gorouter")
+        self.assertEqual(m_id, "claude-opus-5")
+        self.assertIn("gorouter.app", client.base_url.host)
+
+    def test_cross_provider_model_rejected(self):
+        from llm_providers import get_provider_client
+        with self.assertRaisesRegex(ValueError, "is not supported"):
+            get_provider_client("groq", "claude-opus-5")
+
+    @patch.dict(os.environ, {"LLM_TOKENFORGE_ENABLED": "false"})
+    def test_disabled_provider_rejected_even_if_requested(self):
+        import importlib
+        import llm_providers
+        importlib.reload(llm_providers)
+        with self.assertRaisesRegex(ValueError, "is currently disabled"):
+            llm_providers.get_provider_client("tokenforge", "claude-opus-5")
+
+
 if __name__ == '__main__':
     unittest.main(testRunner=unittest.TextTestRunner(
         resultclass=EmojiTestResult, verbosity=2))

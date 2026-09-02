@@ -1,11 +1,10 @@
+import config
 import os
 import logging
 from motor.motor_asyncio import AsyncIOMotorClient
-from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
-load_dotenv()
 
 MONGODB_URI = os.getenv("MONGODB_URI")
 if not MONGODB_URI:

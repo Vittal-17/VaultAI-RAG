@@ -1,6 +1,8 @@
+import config
 from fastapi import FastAPI, UploadFile, File, HTTPException, Response, Depends, Cookie
 from fastapi.middleware.cors import CORSMiddleware
 from database import check_db_connection, users_collection, chats_collection, collection
+from llm_providers import get_public_provider_catalog
 from services import process_and_store_document, generate_chat_response, generate_auto_title
 from auth import get_password_hash, verify_password, create_access_token, decode_access_token
 import uvicorn
@@ -215,6 +217,9 @@ class GoogleAuthRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str
     chat_id: str | None = None
+    provider: str | None = None
+    model: str | None = None
+
 
 @app.get("/api/csrf")
 @limiter.limit(RATE_LIMIT_GENERAL)
@@ -345,9 +350,12 @@ async def logout(request: Request, response: Response):
 async def get_me(request: Request, current_user: dict = Depends(get_current_user)):
     return {"user": current_user}
 
-class ChatRequest(BaseModel):
-    message: str
-    chat_id: str | None = None
+@app.get("/api/llm/providers")
+@limiter.limit(RATE_LIMIT_GENERAL)
+async def get_llm_providers(request: Request, current_user: dict = Depends(get_current_user)):
+    return get_public_provider_catalog()
+
+
 
 @app.get("/api/documents")
 @limiter.limit(RATE_LIMIT_GENERAL)
@@ -486,7 +494,7 @@ async def chat(request: Request, body_req: ChatRequest, current_user: dict = Dep
 
         generated_title = None
         if chat_title == "New Conversation":
-            new_title = await generate_auto_title(request.message)
+            new_title = await generate_auto_title(request.message, provider_id=request.provider, model_id=request.model)
             if new_title and new_title != "New Conversation":
                 await chats_collection.update_one(
                     {"chat_id": chat_id},

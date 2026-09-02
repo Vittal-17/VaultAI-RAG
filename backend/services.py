@@ -1,8 +1,8 @@
+import config
 import os
 import io
 import logging
 from pypdf import PdfReader
-from dotenv import load_dotenv
 from database import collection
 from openai import AsyncOpenAI
 
@@ -15,16 +15,9 @@ from embeddings import (
 
 logger = logging.getLogger(__name__)
 
-load_dotenv()
 
-GOROUTER_API_KEY = os.getenv("GOROUTER_API_KEY")
-if not GOROUTER_API_KEY:
-    raise ValueError("FATAL: GOROUTER_API_KEY environment variable is not set!")
+from llm_providers import get_provider_client
 
-gorouter_client = AsyncOpenAI(
-    api_key=GOROUTER_API_KEY,
-    base_url="https://gorouter.app/v1",
-)
 MAX_PDF_PAGES = int(os.getenv("MAX_PDF_PAGES", 200))
 MAX_CHUNKS_PER_DOCUMENT = int(os.getenv("MAX_CHUNKS_PER_DOCUMENT", 5000))
 
@@ -112,7 +105,7 @@ async def process_and_store_document(filename: str, pdf_bytes: bytes, user_email
             logger.exception("MongoDB insertion failed for %s", filename)
             raise Exception("Database insertion failed. Upload aborted.")
 
-async def generate_chat_response(query: str, user_email: str) -> str:
+async def generate_chat_response(query: str, user_email: str, provider_id: str | None = None, model_id: str | None = None) -> str:
     """Searches MongoDB for relevant chunks, isolates tenant data, and formats a sourced response."""
     try:
         provider = get_embedding_provider()
@@ -182,9 +175,11 @@ Question:
 {query}
 """
 
-        # Generate response using GoRouter
-        response = await gorouter_client.chat.completions.create(
-            model="claude-opus-5",
+        # Resolve dynamic provider
+        client, resolved_provider, resolved_model = get_provider_client(provider_id, model_id)
+        # Generate response
+        response = await client.chat.completions.create(
+            model=resolved_model,
             messages=[
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": query}
@@ -214,11 +209,12 @@ Question:
         logger.exception("Error in chat generation")
         raise e
 
-async def generate_auto_title(query: str) -> str:
+async def generate_auto_title(query: str, provider_id: str | None = None, model_id: str | None = None) -> str:
     """Generates a short punchy title based on the first query."""
     try:
-        title_response = await gorouter_client.chat.completions.create(
-            model="claude-opus-5",
+        client, resolved_provider, resolved_model = get_provider_client(provider_id, model_id)
+        title_response = await client.chat.completions.create(
+            model=resolved_model,
             messages=[{
                 "role": "user",
                 "content": (
@@ -228,7 +224,8 @@ async def generate_auto_title(query: str) -> str:
             }],
             max_tokens=30,
         )
-        return title_response.choices[0].message.content.strip().replace('"', "").replace("'", "")
+        title = title_response.choices[0].message.content.strip().replace('"', "").replace("'", "")
+        return title if title else "New Conversation"
     except Exception as e:
         logger.warning("Error in auto-title generation, falling back to default", exc_info=True)
         return "New Conversation"

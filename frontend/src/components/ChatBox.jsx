@@ -3,6 +3,7 @@ import { Send, User, Bot, Loader2, Copy, Check, Paperclip } from 'lucide-react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import ReactMarkdown from 'react-markdown';
+import ProviderSelector from './ProviderSelector';
 import remarkGfm from 'remark-gfm';
 
 const ChatBox = ({ activeChatId, setActiveChatId, setChats }) => {
@@ -12,6 +13,38 @@ const ChatBox = ({ activeChatId, setActiveChatId, setChats }) => {
   const [copiedIndex, setCopiedIndex] = useState(null);
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
+
+  const [providers, setProviders] = useState([]);
+  const [selectedProvider, setSelectedProvider] = useState('');
+  const [selectedModel, setSelectedModel] = useState('');
+
+  useEffect(() => {
+    const fetchProviders = async () => {
+      try {
+        const res = await axios.get('/api/llm/providers');
+        const data = res.data.providers || [];
+        const defProv = res.data.default_provider;
+        const defMod = res.data.default_model;
+        setProviders(data);
+        if (data.length > 0) {
+          const matchedProv = data.find(p => p.id === defProv);
+          if (matchedProv) {
+            setSelectedProvider(matchedProv.id);
+            const matchedMod = matchedProv.models.find(m => m.id === defMod);
+            setSelectedModel(matchedMod ? matchedMod.id : (matchedProv.models[0]?.id || ""));
+          } else {
+            const firstProv = data[0];
+            setSelectedProvider(firstProv.id);
+            setSelectedModel(firstProv.models[0]?.id || "");
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load providers", err);
+      }
+    };
+    fetchProviders();
+  }, []);
+
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -48,14 +81,14 @@ const ChatBox = ({ activeChatId, setActiveChatId, setChats }) => {
 
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
-    
+
     const userContent = input.trim();
     const userMessage = { role: 'user', content: userContent };
-    
+
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsLoading(true);
-    
+
     // Reset textarea height
     if (textareaRef.current) {
       textareaRef.current.style.height = 'inherit';
@@ -64,18 +97,20 @@ const ChatBox = ({ activeChatId, setActiveChatId, setChats }) => {
     try {
       const response = await axios.post('/chat', {
         message: userContent,
-        chat_id: activeChatId
+        chat_id: activeChatId,
+        provider: selectedProvider,
+        model: selectedModel
       });
-      
+
       const assistantMessage = { role: 'assistant', content: response.data.response };
       setMessages(prev => [...prev, assistantMessage]);
-      
+
       // Update the chat title dynamically if returned
       if (response.data.title) {
-        setChats(prevChats => 
-          prevChats.map(chat => 
-            chat.chat_id === response.data.chat_id 
-              ? { ...chat, title: response.data.title } 
+        setChats(prevChats =>
+          prevChats.map(chat =>
+            chat.chat_id === response.data.chat_id
+              ? { ...chat, title: response.data.title }
               : chat
           )
         );
@@ -114,9 +149,11 @@ const ChatBox = ({ activeChatId, setActiveChatId, setChats }) => {
 
   return (
     <div className="flex flex-col h-full w-full min-h-0 bg-transparent relative overflow-hidden">
-      
+
+
       {/* Messages Area */}
       <div className="flex-1 min-h-0 overflow-y-auto px-4 md:px-8 lg:px-24 py-8 pb-36 space-y-8 custom-scrollbar">
+
         {messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center max-w-lg mx-auto mt-[-10vh] animate-in fade-in slide-in-from-bottom-4 duration-700">
             <div className="w-16 h-16 bg-[#ffffff]/60 rounded-2xl flex items-center justify-center mb-6 shadow-xl shadow-cyan-950/5 border border-cyan-300/60">
@@ -131,19 +168,19 @@ const ChatBox = ({ activeChatId, setActiveChatId, setChats }) => {
           messages.map((msg, idx) => (
             <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
               <div className={`flex max-w-[85%] ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                
+
                 {/* Avatar */}
                 <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center shadow-md
-                  ${msg.role === 'user' 
-                    ? 'bg-gradient-to-r from-cyan-500 to-teal-500 ml-4' 
+                  ${msg.role === 'user'
+                    ? 'bg-gradient-to-r from-cyan-500 to-teal-500 ml-4'
                     : 'bg-[#ffffff]/80 border border-cyan-300/60 mr-4'}`}>
                   {msg.role === 'user' ? <User className="w-4 h-4 text-white" /> : <Bot className="w-4 h-4 text-[#0e3b43]" />}
                 </div>
-                
+
                 {/* Bubble */}
                 <div className={`relative group ${
-                  msg.role === 'user' 
-                    ? 'bg-gradient-to-r from-cyan-500 to-teal-500 text-white font-semibold rounded-2xl rounded-tr-sm px-5 py-3 shadow-lg shadow-cyan-500/20' 
+                  msg.role === 'user'
+                    ? 'bg-gradient-to-r from-cyan-500 to-teal-500 text-white font-semibold rounded-2xl rounded-tr-sm px-5 py-3 shadow-lg shadow-cyan-500/20'
                     : 'bg-[#ffffff]/80 backdrop-blur-xl border border-cyan-300/50 text-[#0e3b43] rounded-2xl rounded-tl-sm px-6 py-4 shadow-md shadow-cyan-950/5'
                 }`}>
                   {msg.role === 'user' ? (
@@ -159,7 +196,7 @@ const ChatBox = ({ activeChatId, setActiveChatId, setChats }) => {
                   {/* Actions for Assistant */}
                   {msg.role === 'assistant' && (
                     <div className="absolute -bottom-8 left-0 opacity-0 group-hover:opacity-100 transition-opacity flex space-x-2">
-                      <button 
+                      <button
                         onClick={() => handleCopy(msg.content, idx)}
                         className="flex items-center space-x-1.5 text-xs text-teal-800/70 hover:text-[#0e3b43] bg-[#ffffff]/80 px-2 py-1 rounded-md border border-cyan-300/50 transition-colors shadow-sm pointer-events-auto font-semibold"
                       >
@@ -173,7 +210,7 @@ const ChatBox = ({ activeChatId, setActiveChatId, setChats }) => {
             </div>
           ))
         )}
-        
+
         {/* Loading Indicator */}
         {isLoading && (
           <div className="flex justify-start animate-in fade-in">
@@ -197,12 +234,25 @@ const ChatBox = ({ activeChatId, setActiveChatId, setChats }) => {
 
       {/* Input Area */}
       <div className="absolute bottom-0 w-full pointer-events-none z-20 pb-8 pt-12 bg-gradient-to-t from-[#cbf0f8] via-[#e0f6f8]/90 to-transparent">
+        <div className="max-w-4xl mx-auto flex flex-col items-start px-2">
+          {providers.length > 0 && (
+            <div className="mb-2 pointer-events-auto">
+              <ProviderSelector
+                providers={providers}
+                selectedProvider={selectedProvider}
+                setSelectedProvider={setSelectedProvider}
+                selectedModel={selectedModel}
+                setSelectedModel={setSelectedModel}
+              />
+            </div>
+          )}
+        </div>
         <div className="relative flex items-end max-w-4xl mx-auto bg-[#ffffff]/80 backdrop-blur-xl border border-cyan-300 shadow-xl shadow-cyan-950/5 rounded-2xl p-2 pointer-events-auto transition-all focus-within:border-cyan-500 focus-within:ring-2 focus-within:ring-cyan-400/30">
-          
+
           <button className="p-3 text-teal-800/70 hover:text-cyan-600 transition-colors flex-shrink-0">
             <Paperclip className="w-5 h-5" />
           </button>
-          
+
           <textarea
             ref={textareaRef}
             className="w-full max-h-48 py-3 px-2 bg-transparent text-[#0e3b43] placeholder-teal-800/40 focus:outline-none resize-none text-sm leading-relaxed custom-scrollbar pointer-events-auto font-medium"
@@ -213,13 +263,13 @@ const ChatBox = ({ activeChatId, setActiveChatId, setChats }) => {
             onKeyDown={handleKeyPress}
             disabled={isLoading}
           />
-          
+
           <button
             onClick={handleSend}
             disabled={!input.trim() || isLoading}
             className={`p-2.5 m-1 rounded-xl flex-shrink-0 transition-all duration-300 pointer-events-auto ${
               input.trim() && !isLoading
-                ? 'bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-400 hover:to-teal-400 text-white font-bold shadow-md shadow-cyan-500/25 scale-100 hover:scale-105' 
+                ? 'bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-400 hover:to-teal-400 text-white font-bold shadow-md shadow-cyan-500/25 scale-100 hover:scale-105'
                 : 'bg-[#ffffff]/50 text-teal-800/40 cursor-not-allowed scale-95 border border-cyan-300/40'
             }`}
           >

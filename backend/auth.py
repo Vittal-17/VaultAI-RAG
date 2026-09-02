@@ -1,11 +1,10 @@
+import config
 from datetime import datetime, timedelta
 import os
 import bcrypt
 import jwt
 import hashlib
-from dotenv import load_dotenv
 
-load_dotenv()
 
 # FATAL CRASH if secret is missing
 SECRET_KEY = os.getenv("JWT_SECRET_KEY")
