@@ -225,6 +225,55 @@ print("SET_COOKIE:", set_cookie)
         self.assertEqual(response.status_code, 500)
         self.assertEqual(response.json()["detail"], "Failed to generate response. Please try again.")
 
+
+    @patch("main.chats_collection.insert_one", new_callable=AsyncMock)
+    @patch("main.chats_collection.update_one", new_callable=AsyncMock)
+    @patch("main.generate_auto_title", new_callable=AsyncMock)
+    @patch("main.generate_chat_response", new_callable=AsyncMock)
+    def test_6_chat_endpoint_forwards_provider_model(self, mock_generate_chat, mock_auto_title, mock_update, mock_insert):
+        """Verify /chat endpoint correctly forwards provider/model to generate_chat_response"""
+        mock_generate_chat.return_value = "Mock response"
+        mock_auto_title.return_value = "Mock title"
+        mock_update.return_value = None
+        mock_insert.return_value = None
+        from main import get_current_user
+        app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
+        csrf_token = "mock-csrf-token"
+        response = client.post(
+            "/chat",
+            json={
+                "message": "Hello",
+                "provider": "groq",
+                "model": "openai/gpt-oss-120b"
+            },
+            cookies={"csrf_token": csrf_token},
+            headers={"X-CSRF-Token": csrf_token}
+        )
+        self.assertEqual(response.status_code, 200)
+        mock_generate_chat.assert_called_once_with(
+            "Hello",
+            "user@test.com",
+            provider_id="groq",
+            model_id="openai/gpt-oss-120b"
+        )
+
+        # Test default fallback when omitted
+        mock_generate_chat.reset_mock()
+        response2 = client.post(
+            "/chat",
+            json={"message": "Hello2"},
+            cookies={"csrf_token": csrf_token},
+            headers={"X-CSRF-Token": csrf_token}
+        )
+        self.assertEqual(response2.status_code, 200)
+        mock_generate_chat.assert_called_once_with(
+            "Hello2",
+            "user@test.com",
+            provider_id=None,
+            model_id=None
+        )
+        app.dependency_overrides = {}
+
     def test_6_csrf_get_without_token(self):
         """1. GET request without CSRF token"""
         response = client.get('/api/csrf')

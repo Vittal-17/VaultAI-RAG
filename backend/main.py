@@ -503,7 +503,7 @@ async def chat(request: Request, body_req: ChatRequest, current_user: dict = Dep
                 generated_title = new_title
 
         # Generate response
-        answer = await generate_chat_response(request.message, current_user["email"])
+        answer = await generate_chat_response(request.message, current_user["email"], provider_id=request.provider, model_id=request.model)
 
         # Update chat thread
         user_msg = {"role": "user", "content": request.message, "timestamp": datetime.utcnow()}
