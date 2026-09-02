@@ -6,7 +6,8 @@ import axios from 'axios'
 import { GoogleOAuthProvider } from '@react-oauth/google'
 
 axios.defaults.withCredentials = true;
-axios.defaults.baseURL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") || "http://localhost:8000";
+axios.defaults.baseURL = API_BASE_URL;
 
 let csrfToken = null;
 let csrfPromise = null;
