@@ -24,7 +24,7 @@ PROVIDER_REGISTRY = {
     "groq": ProviderDefinition(
         id="groq",
         name="Groq",
-        enabled=os.getenv("LLM_GROQ_ENABLED", "true").lower() == "true",
+        enabled=os.getenv("LLM_GROQ_ENABLED", "false").lower() == "true",
         api_key_env="GROQ_API_KEY",
         base_url="https://api.groq.com/openai/v1",
         default_model="openai/gpt-oss-120b",
@@ -36,7 +36,7 @@ PROVIDER_REGISTRY = {
     "gorouter": ProviderDefinition(
         id="gorouter",
         name="GoRouter",
-        enabled=os.getenv("LLM_GOROUTER_ENABLED", "true").lower() == "true",
+        enabled=os.getenv("LLM_GOROUTER_ENABLED", "false").lower() == "true",
         api_key_env="GOROUTER_API_KEY",
         base_url="https://gorouter.app/v1",
         default_model="claude-opus-5",
@@ -50,10 +50,10 @@ PROVIDER_REGISTRY = {
         enabled=os.getenv("LLM_TOKENFORGE_ENABLED", "false").lower() == "true",
         api_key_env="TOKENFORGE_API_KEY",
         base_url="https://tokenforge.ai.studio/v1",
-        default_model="claude-opus-5",
+        default_model="glm-5.3",
         models=[
-            ModelDefinition(id="claude-opus-5", name="Claude Opus 5"),
             ModelDefinition(id="claude-fable-5", name="Claude Fable 5"),
+            ModelDefinition(id="glm-5.3", name="GLM 5.3"),
         ]
     ),
     "conduit": ProviderDefinition(
@@ -66,11 +66,34 @@ PROVIDER_REGISTRY = {
         models=[
             ModelDefinition(id="claude-haiku-4-5", name="Claude Haiku 4.5"),
         ]
+    ),
+    "justworker": ProviderDefinition(
+        id="justworker",
+        name="JustWorker",
+        enabled=os.getenv("LLM_JUSTWORKER_ENABLED", "false").lower() == "true",
+        api_key_env="JUSTWORKER_API_KEY",
+        base_url="https://api.justwoker.icu/v1",
+        default_model="claude-opus-5",
+        models=[
+            ModelDefinition(id="claude-opus-5", name="Claude Opus 5"),
+        ]
+    ),
+    "tabitoken": ProviderDefinition(
+        id="tabitoken",
+        name="TabiToken",
+        enabled=os.getenv("LLM_TABITOKEN_ENABLED", "false").lower() == "true",
+        api_key_env="TABITOKEN_API_KEY",
+        base_url="https://tabitoken.com/v1",
+        default_model="claude-opus-5",
+        models=[
+            ModelDefinition(id="claude-opus-5", name="Claude Opus 5"),
+            ModelDefinition(id="claude-opus-5-thinking", name="Claude Opus 5(THINKING)"),
+        ]
     )
 }
 
-LLM_DEFAULT_PROVIDER = os.getenv("LLM_DEFAULT_PROVIDER", "gorouter")
-LLM_DEFAULT_MODEL = os.getenv("LLM_DEFAULT_MODEL", "claude-opus-5")
+LLM_DEFAULT_PROVIDER = os.getenv("LLM_DEFAULT_PROVIDER", "groq")
+LLM_DEFAULT_MODEL = os.getenv("LLM_DEFAULT_MODEL", "openai/gpt-oss-20b")
 
 # Fail startup safely if defaults are totally invalid
 if LLM_DEFAULT_PROVIDER not in PROVIDER_REGISTRY:
