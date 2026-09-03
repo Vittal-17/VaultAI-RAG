@@ -209,10 +209,11 @@ Question:
         logger.exception("Error in chat generation")
         raise e
 
-async def generate_auto_title(query: str, provider_id: str | None = None, model_id: str | None = None) -> str:
+async def generate_auto_title(query: str) -> str:
     """Generates a short punchy title based on the first query."""
     try:
-        client, resolved_provider, resolved_model = get_provider_client(provider_id, model_id)
+        from llm_providers import TITLE_PROVIDER, TITLE_MODEL
+        client, resolved_provider, resolved_model = get_provider_client(TITLE_PROVIDER, TITLE_MODEL)
         title_response = await client.chat.completions.create(
             model=resolved_model,
             messages=[{

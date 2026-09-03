@@ -95,6 +95,10 @@ PROVIDER_REGISTRY = {
 LLM_DEFAULT_PROVIDER = os.getenv("LLM_DEFAULT_PROVIDER", "groq")
 LLM_DEFAULT_MODEL = os.getenv("LLM_DEFAULT_MODEL", "openai/gpt-oss-20b")
 
+TITLE_PROVIDER = "groq"
+TITLE_MODEL = "openai/gpt-oss-20b"
+
+
 # Fail startup safely if defaults are totally invalid
 if LLM_DEFAULT_PROVIDER not in PROVIDER_REGISTRY:
     raise ValueError(f"FATAL: Default LLM provider '{LLM_DEFAULT_PROVIDER}' is not registered.")

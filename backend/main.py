@@ -494,10 +494,10 @@ async def chat(request: Request, body_req: ChatRequest, current_user: dict = Dep
 
         generated_title = None
         if chat_title == "New Conversation":
-            new_title = await generate_auto_title(request.message, provider_id=request.provider, model_id=request.model)
+            new_title = await generate_auto_title(request.message)
             if new_title and new_title != "New Conversation":
                 await chats_collection.update_one(
-                    {"chat_id": chat_id},
+                    {"chat_id": chat_id, "user_email": current_user["email"]},
                     {"$set": {"title": new_title}}
                 )
                 generated_title = new_title
@@ -510,7 +510,7 @@ async def chat(request: Request, body_req: ChatRequest, current_user: dict = Dep
         assistant_msg = {"role": "assistant", "content": answer, "timestamp": datetime.utcnow()}
 
         await chats_collection.update_one(
-            {"chat_id": chat_id},
+            {"chat_id": chat_id, "user_email": current_user["email"]},
             {"$push": {"messages": {"$each": [user_msg, assistant_msg]}}}
         )
 
@@ -519,6 +519,9 @@ async def chat(request: Request, body_req: ChatRequest, current_user: dict = Dep
             response_payload["title"] = generated_title
         elif not is_new_chat:
             response_payload["title"] = chat_title
+        else:
+            # If it's a new chat, but title generation failed, provide the default.
+            response_payload["title"] = "New Conversation"
 
         return response_payload
     except HTTPException:

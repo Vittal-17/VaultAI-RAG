@@ -15,6 +15,99 @@ client = TestClient(app)
 
 class TestCYPHRSecurityAndRAG(unittest.IsolatedAsyncioTestCase):
 
+    @patch("main.chats_collection.find_one", new_callable=AsyncMock)
+    @patch("main.chats_collection.update_one", new_callable=AsyncMock)
+    @patch("main.generate_chat_response", new_callable=AsyncMock)
+    @patch("main.generate_auto_title", new_callable=AsyncMock)
+    def test_sidebar_flow_updates_title(self, mock_auto_title, mock_generate_chat, mock_update, mock_find):
+        """Verify that an existing chat with 'New Conversation' gets its title updated in DB and response."""
+        mock_find.return_value = {"chat_id": "fake-123", "title": "New Conversation"}
+        mock_generate_chat.return_value = "Mock answer"
+        mock_auto_title.return_value = "Generated Awesome Title"
+
+        from main import get_current_user
+        app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
+        csrf_token = "mock-csrf-token"
+
+        response = client.post(
+            "/chat",
+            json={"message": "Test message", "chat_id": "fake-123", "provider": "tokenforge", "model": "claude-fable-5"},
+            cookies={"csrf_token": csrf_token},
+            headers={"X-CSRF-Token": csrf_token}
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        # Verify the auto-title was generated
+        mock_auto_title.assert_called_once_with("Test message")
+
+        # Verify the DB was updated with the new title
+        mock_update.assert_any_call({"chat_id": "fake-123", "user_email": "user@test.com"}, {"$set": {"title": "Generated Awesome Title"}})
+
+        # Verify the response payload has the title
+        self.assertEqual(response.json().get("title"), "Generated Awesome Title")
+
+        app.dependency_overrides = {}
+
+
+    @patch("services.get_provider_client")
+    async def test_auto_title_always_resolves_groq_20b(self, mock_get_client):
+        """Verify generate_auto_title ALWAYS resolves Groq 20B regardless of anything else."""
+        mock_client = AsyncMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content="Mocked Title"))]
+        mock_client.chat.completions.create.return_value = mock_response
+        # get_provider_client returns (client, resolved_provider, resolved_model)
+        mock_get_client.return_value = (mock_client, "groq", "openai/gpt-oss-20b")
+        from services import generate_auto_title
+        # Test A: Basic call
+        title = await generate_auto_title("hello world")
+        self.assertEqual(title, "Mocked Title")
+        # Prove it requested the TITLE_PROVIDER and TITLE_MODEL from get_provider_client
+        mock_get_client.assert_called_with("groq", "openai/gpt-oss-20b")
+        mock_client.chat.completions.create.assert_called_once()
+        kwargs = mock_client.chat.completions.create.call_args.kwargs
+        self.assertEqual(kwargs["model"], "openai/gpt-oss-20b")
+        self.assertTrue("hello world" in kwargs["messages"][0]["content"])
+
+    @patch("main.chats_collection.insert_one", new_callable=AsyncMock)
+    @patch("main.chats_collection.update_one", new_callable=AsyncMock)
+    @patch("main.generate_chat_response", new_callable=AsyncMock)
+    @patch("main.generate_auto_title", new_callable=AsyncMock)
+    def test_auto_title_independent_of_answer_model(self, mock_auto_title, mock_generate_chat, mock_update, mock_insert):
+        """Prove the /chat endpoint isolates answer routing from title routing for multiple models."""
+        mock_generate_chat.return_value = "Mock answer"
+        mock_auto_title.return_value = "Mock title"
+        from main import get_current_user
+        app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
+        csrf_token = "mock-csrf-token"
+        test_cases = [
+            ("tokenforge", "glm-5.3"),
+            ("tokenforge", "claude-fable-5"),
+            ("groq", "openai/gpt-oss-120b")
+        ]
+        for prov, mod in test_cases:
+            mock_generate_chat.reset_mock()
+            mock_auto_title.reset_mock()
+
+            response = client.post(
+                "/chat",
+                json={"message": "Test message", "provider": prov, "model": mod},
+                cookies={"csrf_token": csrf_token},
+                headers={"X-CSRF-Token": csrf_token}
+            )
+
+            self.assertEqual(response.status_code, 200)
+
+            # 1. Answer model follows user selection
+            mock_generate_chat.assert_called_once_with("Test message", "user@test.com", provider_id=prov, model_id=mod)
+
+            # 2. Title generation NEVER receives the user's provider/model
+            mock_auto_title.assert_called_once_with("Test message")
+
+        app.dependency_overrides = {}
+
+
     def test_patch_9_production_csrf_cookie(self):
         """PATCH 9: Verify ACTUAL emitted CSRF Set-Cookie header in production contains Secure and SameSite=None."""
         import subprocess
@@ -108,9 +201,9 @@ print("SET_COOKIE:", set_cookie)
 
         mock_llm_response = MagicMock()
         mock_llm_response.choices = [MagicMock(message=MagicMock(content="Mocked answer"))]
-        mock_client = __import__('unittest').mock.MagicMock()
+        mock_client = MagicMock()
 
-        mock_client.chat.completions.create = __import__('unittest').mock.AsyncMock(return_value=mock_llm_response)
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_llm_response)
 
         mock_gorouter.return_value = (mock_client, 'gorouter', 'claude-opus-5')
 
@@ -139,9 +232,9 @@ print("SET_COOKIE:", set_cookie)
 
         mock_llm_response = MagicMock()
         mock_llm_response.choices = [MagicMock(message=MagicMock(content="Mocked answer"))]
-        mock_client = __import__('unittest').mock.MagicMock()
+        mock_client = MagicMock()
 
-        mock_client.chat.completions.create = __import__('unittest').mock.AsyncMock(return_value=mock_llm_response)
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_llm_response)
 
         mock_gorouter.return_value = (mock_client, 'gorouter', 'claude-opus-5')
 
@@ -168,9 +261,9 @@ print("SET_COOKIE:", set_cookie)
 
         mock_llm_response = MagicMock()
         mock_llm_response.choices = [MagicMock(message=MagicMock(content="Here is the info."))]
-        mock_client = __import__('unittest').mock.MagicMock()
+        mock_client = MagicMock()
 
-        mock_client.chat.completions.create = __import__('unittest').mock.AsyncMock(return_value=mock_llm_response)
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_llm_response)
 
         mock_gorouter.return_value = (mock_client, 'gorouter', 'claude-opus-5')
 
@@ -196,9 +289,9 @@ print("SET_COOKIE:", set_cookie)
 
         mock_llm_response = MagicMock()
         mock_llm_response.choices = [MagicMock(message=MagicMock(content="Based on file3.pdf, here is the result."))]
-        mock_client = __import__('unittest').mock.MagicMock()
+        mock_client = MagicMock()
 
-        mock_client.chat.completions.create = __import__('unittest').mock.AsyncMock(return_value=mock_llm_response)
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_llm_response)
 
         mock_gorouter.return_value = (mock_client, 'gorouter', 'claude-opus-5')
 
@@ -256,6 +349,7 @@ print("SET_COOKIE:", set_cookie)
             provider_id="groq",
             model_id="openai/gpt-oss-120b"
         )
+        mock_auto_title.assert_called_once_with("Hello")
 
         # Test default fallback when omitted
         mock_generate_chat.reset_mock()
@@ -272,6 +366,7 @@ print("SET_COOKIE:", set_cookie)
             provider_id=None,
             model_id=None
         )
+        mock_auto_title.assert_called_with("Hello2")
         app.dependency_overrides = {}
 
     def test_6_csrf_get_without_token(self):
@@ -886,9 +981,9 @@ print(ACCESS_TOKEN_EXPIRE_MINUTES * 60)
         mock_embed.return_value = [0.9]*768
         mock_gorouter_response = MagicMock()
         mock_gorouter_response.choices = [MagicMock(message=MagicMock(content="Async response"))]
-        mock_client = __import__('unittest').mock.MagicMock()
+        mock_client = MagicMock()
 
-        mock_client.chat.completions.create = __import__('unittest').mock.AsyncMock(return_value=mock_gorouter_response)
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_gorouter_response)
 
         mock_gorouter.return_value = (mock_client, 'gorouter', 'claude-opus-5')
         with patch("services.collection.distinct", new_callable=AsyncMock, return_value=["test.pdf"]), \
@@ -1097,9 +1192,9 @@ class TestCYPHRPatch8A(unittest.IsolatedAsyncioTestCase):
             mock_embed_query.return_value = [0.8]*768
             mock_gorouter_response = MagicMock()
             mock_gorouter_response.choices = [MagicMock(message=MagicMock(content="Answer"))]
-            mock_client = __import__('unittest').mock.MagicMock()
+            mock_client = MagicMock()
 
-            mock_client.chat.completions.create = __import__('unittest').mock.AsyncMock(return_value=mock_gorouter_response)
+            mock_client.chat.completions.create = AsyncMock(return_value=mock_gorouter_response)
 
             mock_gorouter.return_value = (mock_client, 'gorouter', 'claude-opus-5')
 
@@ -2178,7 +2273,8 @@ class TestRuntimeRouting(unittest.IsolatedAsyncioTestCase):
         mock_distinct.return_value = ["test.pdf"]; mock_distinct.side_effect = AsyncMock(return_value=["test.pdf"])
 
         with patch.dict(os.environ, {"LLM_GOROUTER_ENABLED": "true", "GOROUTER_API_KEY": "fake"}, clear=False):
-
+            import llm_providers
+            llm_providers.PROVIDER_REGISTRY["gorouter"].enabled = True
             res = await generate_chat_response("query", "user@test.com", "gorouter", "claude-opus-5")
 
             mock_openai_cls.assert_called_with(api_key="fake", base_url="https://gorouter.app/v1")
@@ -2243,7 +2339,7 @@ class TestRuntimeRouting(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(kwargs["model"], "openai/gpt-oss-20b")
 
     @patch("llm_providers.AsyncOpenAI")
-    async def test_auto_title_routing(self, mock_openai_cls):
+    async def test_auto_title_routing_independent(self, mock_openai_cls):
         import llm_providers
         llm_providers._client_cache.clear()
 
@@ -2256,16 +2352,16 @@ class TestRuntimeRouting(unittest.IsolatedAsyncioTestCase):
 
         with patch.dict(os.environ, {"LLM_GROQ_ENABLED": "true", "GROQ_API_KEY": "fake_groq"}, clear=False):
 
-            title = await generate_auto_title("hello", "groq", "openai/gpt-oss-120b")
+            title = await generate_auto_title("hello")
 
             mock_openai_cls.assert_called_with(api_key="fake_groq", base_url="https://api.groq.com/openai/v1")
             mock_instance.chat.completions.create.assert_called_once()
             _, kwargs = mock_instance.chat.completions.create.call_args
-            self.assertEqual(kwargs["model"], "openai/gpt-oss-120b")
+            self.assertEqual(kwargs["model"], "openai/gpt-oss-20b")
             self.assertEqual(title, "My Title")
 
 
-class TestProviderRegistry(unittest.TestCase):
+class TestProviderRegistry(unittest.IsolatedAsyncioTestCase):
     def test_dotenv_loaded_before_providers(self):
         import ast
         with open("main.py", "r") as f:
@@ -2290,14 +2386,14 @@ class TestProviderRegistry(unittest.TestCase):
         self.assertIn("providers", data)
         self.assertIn("default_provider", data)
         self.assertIn("default_model", data)
-        self.assertEqual(data["default_provider"], "gorouter")
-        self.assertEqual(data["default_model"], "claude-opus-5")
+        self.assertEqual(data["default_provider"], "groq")
+        self.assertEqual(data["default_model"], "openai/gpt-oss-20b")
 
-    @patch.dict(os.environ, {"GROQ_API_KEY": "fake", "GOROUTER_API_KEY": "fake", "JINA_API_KEY": "fake"})
+    @patch.dict(os.environ, {"GROQ_API_KEY": "fake", "GOROUTER_API_KEY": "fake", "JINA_API_KEY": "fake", "LLM_GOROUTER_ENABLED": "true"})
     def test_gorouter_selects_gorouter_client(self):
-        import importlib
         import llm_providers
-        importlib.reload(llm_providers)
+        llm_providers._client_cache.clear()
+        llm_providers.PROVIDER_REGISTRY["gorouter"].enabled = True
         client, p_id, m_id = llm_providers.get_provider_client("gorouter", "claude-opus-5")
         self.assertEqual(p_id, "gorouter")
         self.assertEqual(m_id, "claude-opus-5")
@@ -2319,9 +2415,9 @@ class TestProviderRegistry(unittest.TestCase):
         import llm_providers
         importlib.reload(llm_providers)
         client, p_id, m_id = llm_providers.get_provider_client(None, None)
-        self.assertEqual(p_id, "gorouter")
-        self.assertEqual(m_id, "claude-opus-5")
-        self.assertIn("gorouter.app", client.base_url.host)
+        self.assertEqual(p_id, "groq")
+        self.assertEqual(m_id, "openai/gpt-oss-20b")
+        self.assertIn("api.groq.com", client.base_url.host)
 
     def test_cross_provider_model_rejected(self):
         from llm_providers import get_provider_client
@@ -2336,6 +2432,132 @@ class TestProviderRegistry(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "is currently disabled"):
             llm_providers.get_provider_client("tokenforge", "claude-opus-5")
 
+
+
+    @patch("main.chats_collection.find_one", new_callable=AsyncMock)
+    @patch("main.chats_collection.find", new_callable=MagicMock)
+    @patch("main.chats_collection.update_one", new_callable=AsyncMock)
+    @patch("main.generate_chat_response", new_callable=AsyncMock)
+    @patch("main.generate_auto_title", new_callable=AsyncMock)
+    async def test_39_auto_title_full_persistence_chain(self, mock_auto_title, mock_generate_chat, mock_update, mock_find_cursor, mock_find_one):
+        """a-e. Verify the full auto-title persistence chain."""
+        from main import get_current_user
+        app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
+        csrf_token = "mock-csrf-token"
+
+        # Mock DB state
+        mock_find_one.return_value = {"chat_id": "fake-123", "user_email": "user@test.com", "title": "New Conversation"}
+
+        # Mock cursor for GET /api/chats
+        mock_cursor_instance = MagicMock()
+        mock_cursor_instance.to_list = AsyncMock(return_value = [{"_id": "dummy", "chat_id": "fake-123", "user_email": "user@test.com", "title": "Generated Awesome Title"}])
+        mock_cursor_instance.sort.return_value = mock_cursor_instance
+        mock_find_cursor.return_value = mock_cursor_instance
+
+        mock_generate_chat.return_value = "Mock answer"
+        mock_auto_title.return_value = "Generated Awesome Title"
+
+        # 1. /chat generates the title
+        response = client.post(
+            "/chat",
+            json={"message": "First message", "chat_id": "fake-123", "provider": "tokenforge", "model": "claude-fable-5"},
+            cookies={"csrf_token": csrf_token},
+            headers={"X-CSRF-Token": csrf_token}
+        )
+        self.assertEqual(response.status_code, 200)
+
+        # a. generate_auto_title was called correctly
+        mock_auto_title.assert_called_once_with("First message")
+
+        # b. writes title to the correct tenant-scoped MongoDB chat document
+        mock_update.assert_any_call(
+            {"chat_id": "fake-123", "user_email": "user@test.com"},
+            {"$set": {"title": "Generated Awesome Title"}}
+        )
+
+        # c. response includes the generated title
+        self.assertEqual(response.json().get("title"), "Generated Awesome Title")
+
+        # Update mock_find_one to simulate the DB state having the new title
+        mock_find_one.return_value = {"chat_id": "fake-123", "user_email": "user@test.com", "title": "Generated Awesome Title"}
+
+        # d. GET /api/chats returns the persisted title
+        response_chats = client.get(
+            "/api/chats",
+            cookies={"csrf_token": csrf_token},
+            headers={"X-CSRF-Token": csrf_token}
+        )
+        self.assertEqual(response_chats.status_code, 200)
+        self.assertEqual(response_chats.json()[0]["title"], "Generated Awesome Title")
+
+        # e. GET /api/chats/{chat_id} returns the persisted title
+        response_chat = client.get(
+            "/api/chats/fake-123",
+            cookies={"csrf_token": csrf_token},
+            headers={"X-CSRF-Token": csrf_token}
+        )
+        self.assertEqual(response_chat.status_code, 200)
+        self.assertEqual(response_chat.json()["title"], "Generated Awesome Title")
+
+        app.dependency_overrides = {}
+
+    @patch("main.chats_collection.find_one", new_callable=AsyncMock)
+    @patch("main.chats_collection.update_one", new_callable=AsyncMock)
+    @patch("main.generate_chat_response", new_callable=AsyncMock)
+    @patch("main.generate_auto_title", new_callable=AsyncMock)
+    async def test_40_auto_title_subsequent_message(self, mock_auto_title, mock_generate_chat, mock_update, mock_find_one):
+        """f. A subsequent message does not regenerate or overwrite the title."""
+        from main import get_current_user
+        app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
+        csrf_token = "mock-csrf-token"
+
+        mock_find_one.return_value = {"chat_id": "fake-123", "user_email": "user@test.com", "title": "Existing Title"}
+        mock_generate_chat.return_value = "Mock answer"
+
+        response = client.post(
+            "/chat",
+            json={"message": "Subsequent message", "chat_id": "fake-123", "provider": "tokenforge", "model": "claude-fable-5"},
+            cookies={"csrf_token": csrf_token},
+            headers={"X-CSRF-Token": csrf_token}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json().get("title"), "Existing Title")
+
+        # Verify title was not generated
+        mock_auto_title.assert_not_called()
+
+        app.dependency_overrides = {}
+
+    @patch("main.chats_collection.find_one", new_callable=AsyncMock)
+    @patch("main.chats_collection.update_one", new_callable=AsyncMock)
+    @patch("main.generate_chat_response", new_callable=AsyncMock)
+    @patch("main.generate_auto_title", new_callable=AsyncMock)
+    async def test_41_auto_title_persistence_failure_fallback(self, mock_auto_title, mock_generate_chat, mock_update, mock_find_one):
+        """g. If auto-title fails, main RAG answer still succeeds and no title overwrite occurs."""
+        from main import get_current_user
+        app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
+        csrf_token = "mock-csrf-token"
+
+        mock_find_one.return_value = {"chat_id": "fake-123", "user_email": "user@test.com", "title": "New Conversation"}
+        mock_generate_chat.return_value = "Mock answer"
+        mock_auto_title.return_value = "New Conversation" # Simulated fallback
+
+        response = client.post(
+            "/chat",
+            json={"message": "Test message", "chat_id": "fake-123", "provider": "tokenforge", "model": "claude-fable-5"},
+            cookies={"csrf_token": csrf_token},
+            headers={"X-CSRF-Token": csrf_token}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json().get("title"), "New Conversation")
+
+        # Verify title update was skipped (only 1 update call for messages)
+        self.assertEqual(mock_update.call_count, 1)
+        args, kwargs = mock_update.call_args
+        self.assertIn("$push", args[1])
+
+        app.dependency_overrides = {}
 
 if __name__ == '__main__':
     unittest.main(testRunner=unittest.TextTestRunner(
