@@ -2559,6 +2559,83 @@ class TestProviderRegistry(unittest.IsolatedAsyncioTestCase):
 
         app.dependency_overrides = {}
 
+
+    @patch("main.chats_collection.find_one", new_callable=AsyncMock)
+    @patch("main.chats_collection.update_one", new_callable=AsyncMock)
+    @patch("main.generate_chat_response", new_callable=AsyncMock)
+    @patch("services.get_provider_client")
+    async def test_42_auto_title_empty_fallback(self, mock_get_provider, mock_generate_chat, mock_update, mock_find_one):
+        """Regression test: an empty title response falls back to 'New Conversation'."""
+        from main import get_current_user
+        app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
+        csrf_token = "mock-csrf-token"
+
+        mock_find_one.return_value = {"chat_id": "fake-123", "user_email": "user@test.com", "title": "New Conversation"}
+        mock_generate_chat.return_value = "Mock answer"
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        # Simulate an empty title response with finish_reason="length".
+        mock_response.choices = [MagicMock(message=MagicMock(content=""), finish_reason="length")]
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+
+        mock_get_provider.return_value = (mock_client, 'groq', 'openai/gpt-oss-20b')
+
+        response = client.post(
+            "/chat",
+            json={"message": "Test message", "chat_id": "fake-123", "provider": "tokenforge", "model": "claude-fable-5"},
+            cookies={"csrf_token": csrf_token},
+            headers={"X-CSRF-Token": csrf_token}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        # Because content was empty string, generate_auto_title returns "New Conversation", skipping update
+        self.assertEqual(response.json().get("title"), "New Conversation")
+
+        # Verify title update was skipped (only 1 update call for messages)
+        self.assertEqual(mock_update.call_count, 1)
+        args, kwargs = mock_update.call_args
+        self.assertIn("$push", args[1])
+
+        app.dependency_overrides = {}
+
+    @patch("main.chats_collection.find_one", new_callable=AsyncMock)
+    @patch("main.chats_collection.update_one", new_callable=AsyncMock)
+    @patch("main.generate_chat_response", new_callable=AsyncMock)
+    @patch("services.get_provider_client")
+    async def test_43_auto_title_success_path(self, mock_get_provider, mock_generate_chat, mock_update, mock_find_one):
+        """Verify a concrete generated title such as 'Printing History' survives through."""
+        from main import get_current_user
+        app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
+        csrf_token = "mock-csrf-token"
+
+        mock_find_one.return_value = {"chat_id": "fake-123", "user_email": "user@test.com", "title": "New Conversation"}
+        mock_generate_chat.return_value = "Mock answer"
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock(message=MagicMock(content="Printing History"), finish_reason="stop")]
+        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+
+        mock_get_provider.return_value = (mock_client, 'groq', 'openai/gpt-oss-20b')
+
+        response = client.post(
+            "/chat",
+            json={"message": "Tell me about printing", "chat_id": "fake-123", "provider": "tokenforge", "model": "claude-fable-5"},
+            cookies={"csrf_token": csrf_token},
+            headers={"X-CSRF-Token": csrf_token}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json().get("title"), "Printing History")
+
+        mock_update.assert_any_call(
+            {"chat_id": "fake-123", "user_email": "user@test.com"},
+            {"$set": {"title": "Printing History"}}
+        )
+
+        app.dependency_overrides = {}
+
 if __name__ == '__main__':
     unittest.main(testRunner=unittest.TextTestRunner(
         resultclass=EmojiTestResult, verbosity=2))

@@ -223,7 +223,9 @@ async def generate_auto_title(query: str) -> str:
                     f" Do not use quotes.\n\nPrompt: {query}"
                 ),
             }],
-            max_tokens=30,
+            max_completion_tokens=128,
+            reasoning_effort="low",
+            include_reasoning=False,
         )
         title = title_response.choices[0].message.content.strip().replace('"', "").replace("'", "")
         return title if title else "New Conversation"
