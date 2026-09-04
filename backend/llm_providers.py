@@ -50,10 +50,11 @@ PROVIDER_REGISTRY = {
         enabled=os.getenv("LLM_TOKENFORGE_ENABLED", "false").lower() == "true",
         api_key_env="TOKENFORGE_API_KEY",
         base_url="https://tokenforge.ai.studio/v1",
-        default_model="glm-5.3",
+        default_model="claude-opus-5",
         models=[
             ModelDefinition(id="claude-fable-5", name="Claude Fable 5"),
             ModelDefinition(id="glm-5.3", name="GLM 5.3"),
+            ModelDefinition(id="claude-opus-5", name="Claude Opus 5"),
         ]
     ),
     "conduit": ProviderDefinition(
