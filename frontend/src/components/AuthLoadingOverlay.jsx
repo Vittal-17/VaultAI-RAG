@@ -18,15 +18,26 @@ const EXIT_MS = 380;
 const AuthLoadingOverlay = ({ isVisible }) => {
   const [mounted, setMounted] = useState(isVisible);
   const [visible, setVisible] = useState(isVisible);
+  const [isSlow, setIsSlow] = useState(false);
 
   // Mount first, fade in on the next frame; on the way out, fade before
   // unmounting. Both the frame and the timer are always cancelled.
   useEffect(() => {
+    let slowTimer;
     if (isVisible) {
       setMounted(true);
+      setIsSlow(false);
       const frame = requestAnimationFrame(() => setVisible(true));
-      return () => cancelAnimationFrame(frame);
+
+      // If the backend is cold-starting or network is slow, provide reassurance
+      slowTimer = setTimeout(() => setIsSlow(true), 5000);
+
+      return () => {
+        cancelAnimationFrame(frame);
+        clearTimeout(slowTimer);
+      };
     }
+
     setVisible(false);
     const timer = setTimeout(() => setMounted(false), EXIT_MS);
     return () => clearTimeout(timer);
@@ -67,10 +78,21 @@ const AuthLoadingOverlay = ({ isVisible }) => {
         </div>
 
         <p className="mt-comfortable text-head font-semibold tracking-[0.34em] text-ink">CYPHR</p>
-        <p className="eyebrow mt-2 tracking-[0.26em]">System initializing</p>
+        <p className="eyebrow mt-2 tracking-[0.26em]">
+          {isSlow ? 'Waking up CYPHR' : 'System initializing'}
+        </p>
+
+        {isSlow && (
+          <p className="text-body-sm mt-3 px-4 text-ink-subtle max-w-[320px] sm:max-w-sm animate-fade-in">
+            The server may sleep after a period of inactivity.
+            <br className="hidden sm:block" />
+            <span className="sm:hidden"> </span>
+            Please wait while we reconnect — this usually takes under 45 seconds.
+          </p>
+        )}
 
         {/* Indeterminate progress, the same hairline idiom as document indexing */}
-        <span className="relative mt-normal h-px w-40 overflow-hidden bg-line" aria-hidden="true">
+        <span className={clsx("relative h-px w-40 overflow-hidden bg-line", isSlow ? "mt-5" : "mt-normal")} aria-hidden="true">
           <span className="absolute inset-y-0 w-1/3 animate-sweep-x bg-accent" />
         </span>
       </div>

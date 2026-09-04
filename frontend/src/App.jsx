@@ -70,7 +70,7 @@ function App() {
 
   useEffect(() => {
     let active = true;
-    (async () => {
+    const bootstrap = async () => {
       try {
         const res = await axios.get('/api/me');
         if (!active) return;
@@ -78,10 +78,13 @@ function App() {
         await loadUserData();
       } catch {
         if (active) setUser(null);
-      } finally {
-        if (active) setBooting(false);
       }
-    })();
+    };
+
+    withAuthDelay(bootstrap).finally(() => {
+      if (active) setBooting(false);
+    });
+
     return () => {
       active = false;
     };

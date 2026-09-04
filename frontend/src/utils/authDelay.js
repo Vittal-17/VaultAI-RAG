@@ -1,5 +1,5 @@
 ﻿export const withAuthDelay = async (asyncAction) => {
-  const minDelay = new Promise(resolve => setTimeout(resolve, 2200));
+  const minDelay = new Promise(resolve => setTimeout(resolve, 4000));
   try {
     const [result] = await Promise.all([asyncAction(), minDelay]);
     return result;
