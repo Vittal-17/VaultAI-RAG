@@ -56,7 +56,7 @@ const SourceList = ({ sources }) => {
           return (
             <li key={filename} className="min-w-0">
               <span
-                className="chip max-w-full gap-1.5 border-line-subtle bg-surface-2/80 py-1 pl-2 pr-2.5"
+                className="chip max-w-full gap-1.5 border-line-subtle bg-surface-2/80 py-1 pl-2 pr-2.5 transition-all duration-fast ease-standard hover:-translate-y-px hover:shadow-subtle hover:border-line-strong cursor-default"
                 title={pages.length > 0 ? `${filename} — page ${pages.join(', ')}` : filename}
               >
                 <FileText className="h-3.5 w-3.5 shrink-0 text-accent/80" aria-hidden="true" />

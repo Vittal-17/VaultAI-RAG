@@ -87,9 +87,9 @@ export default {
         pill: "9999px",
       },
       boxShadow: {
-        subtle: "0 1px 2px 0 rgb(0 0 0 / 0.35)",
-        elevated: "0 10px 30px -12px rgb(0 0 0 / 0.65), 0 2px 6px -2px rgb(0 0 0 / 0.4)",
-        panel: "0 32px 80px -24px rgb(0 0 0 / 0.8), 0 4px 12px -4px rgb(0 0 0 / 0.5)",
+        subtle: "0 1px 2px 0 rgb(var(--c-shadow-color) / var(--shadow-subtle))",
+        elevated: "0 10px 30px -12px rgb(var(--c-shadow-color) / var(--shadow-elevated-1)), 0 2px 6px -2px rgb(var(--c-shadow-color) / var(--shadow-elevated-2))",
+        panel: "0 32px 80px -24px rgb(var(--c-shadow-color) / var(--shadow-panel-1)), 0 4px 12px -4px rgb(var(--c-shadow-color) / var(--shadow-panel-2))",
         glow: "0 0 24px -6px rgb(var(--c-accent) / 0.42)",
         "glow-sm": "0 0 14px -4px rgb(var(--c-accent) / 0.5)",
         "glow-lg": "0 0 64px -12px rgb(var(--c-accent) / 0.45)",
@@ -159,6 +159,10 @@ export default {
           "0%, 100%": { opacity: "1" },
           "50%": { opacity: "0.2" },
         },
+        "button-sweep": {
+          from: { transform: "translateX(-200%) skewX(-15deg)" },
+          to: { transform: "translateX(300%) skewX(-15deg)" },
+        },
       },
       animation: {
         "fade-in": "fade-in 220ms cubic-bezier(0.2, 0, 0, 1) both",
@@ -175,6 +179,7 @@ export default {
         "dot-pulse": "dot-pulse 1.25s ease-in-out infinite",
         "sweep-x": "sweep-x 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite",
         "caret-blink": "caret-blink 1.4s ease-in-out infinite",
+        "button-sweep": "button-sweep 0.8s ease-in-out forwards",
       },
       maxWidth: {
         thread: "48rem",

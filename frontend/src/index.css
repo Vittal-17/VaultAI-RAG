@@ -9,11 +9,67 @@
    in tailwind.config.js. Nothing in the app should hard-code a colour.
    ========================================================================== */
 
-:root {
+
+:root, [data-theme="light"] {
+  color-scheme: light;
+
+  /* -- Structural surfaces: canvas to elevated (Light) --------- */
+  --c-surface-0: 248 252 255;
+  --c-shadow-color: 15 30 50;
+  --shadow-subtle: 0.08;
+  --shadow-elevated-1: 0.15;
+  --shadow-elevated-2: 0.08;
+  --shadow-panel-1: 0.15;
+  --shadow-panel-2: 0.08;
+  --c-shadow-strength: 1;
+  --c-surface-1: 244 250 253;
+  --c-surface-2: 255 255 255;
+  --c-surface-3: 251 253 255;
+  --c-surface-4: 238 247 251;
+
+  /* -- Borders ----------------------------------------------------------- */
+  --c-line: 220 234 241;
+  --c-line-subtle: 233 241 247;
+  --c-line-strong: 201 220 232;
+
+  /* -- Typography -------------------------------------------------------- */
+  --c-ink: 15 23 42;
+  --c-ink-dim: 51 65 85;
+  --c-ink-faint: 100 116 139;
+  --c-ink-inverse: 255 255 255;
+
+  /* -- Identity: cyan primary → electric blue secondary ------------------ */
+  --c-accent: 8 145 178;
+  --c-accent-soft: 6 182 212;
+  --c-accent-deep: 34 211 238;
+  --c-azure: 37 99 235;
+  --c-azure-deep: 29 78 216;
+
+  /* -- Status ------------------------------------------------------------ */
+  --c-success: 20 184 166;
+  --c-warning: 245 158 11;
+  --c-danger: 239 68 68;
+
+  /* -- Type families ----------------------------------------------------- */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* -- Layout ------------------------------------------------------------ */
+  --chrome-h: 3.5rem;
+}
+
+[data-theme="dark"] {
   color-scheme: dark;
 
-  /* -- Structural surfaces: deep blue-black → navy, deepest first --------- */
+  /* -- Structural surfaces: deep blue-rgb(var(--c-surface-0)) → navy, deepest first --------- */
   --c-surface-0: 2 6 14;
+  --c-shadow-color: 0 0 0;
+  --shadow-subtle: 0.35;
+  --shadow-elevated-1: 0.65;
+  --shadow-elevated-2: 0.4;
+  --shadow-panel-1: 0.8;
+  --shadow-panel-2: 0.5;
+  --c-shadow-strength: 1;
   --c-surface-1: 6 13 25;
   --c-surface-2: 10 21 38;
   --c-surface-3: 16 32 55;
@@ -41,16 +97,8 @@
   --c-success: 45 212 191;
   --c-warning: 246 189 96;
   --c-danger: 248 113 113;
-
-  /* -- Type families ----------------------------------------------------- */
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    "Helvetica Neue", "Noto Sans", Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas,
-    "Liberation Mono", monospace;
-
-  /* -- Layout ------------------------------------------------------------ */
-  --chrome-h: 3.5rem;
 }
+
 
 /* ==========================================================================
    BASE
@@ -74,7 +122,7 @@
   }
 
   body {
-    @apply bg-surface-0 font-sans text-body text-ink;
+    @apply bg-surface-0 font-sans text-body text-ink transition-colors duration-normal ease-standard;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
     text-rendering: optimizeLegibility;
     overflow: hidden;
@@ -204,7 +252,7 @@
   pointer-events: none;
   background:
     radial-gradient(120% 80% at 50% -20%, rgb(var(--c-surface-2)) 0%, transparent 60%),
-    linear-gradient(180deg, rgb(var(--c-surface-1)) 0%, rgb(var(--c-surface-0)) 55%, rgb(2 5 12) 100%);
+    linear-gradient(180deg, rgb(var(--c-surface-1)) 0%, rgb(var(--c-surface-0)) 55%, rgb(var(--c-surface-0) / 0.8) 100%);
 }
 
 .atmosphere > * {
@@ -275,7 +323,7 @@
 .atmo-vignette {
   inset: 0;
   background:
-    radial-gradient(130% 100% at 50% 50%, transparent 55%, rgb(0 0 0 / 0.55) 100%),
+    radial-gradient(130% 100% at 50% 50%, transparent 55%, rgb(var(--c-surface-0) / 0.75) 100%),
     linear-gradient(180deg, rgb(var(--c-accent) / 0.1) 0px, transparent 1.5px);
 }
 
@@ -308,11 +356,35 @@
 @layer components {
   /* -- Buttons ----------------------------------------------------------- */
   .btn {
-    @apply relative inline-flex select-none items-center justify-center gap-2
+    @apply relative overflow-hidden inline-flex select-none items-center justify-center gap-2
       whitespace-nowrap rounded-lg px-4 py-2.5 text-sub font-semibold
       transition-all duration-fast ease-standard
       disabled:pointer-events-none disabled:opacity-45;
     min-height: 2.5rem;
+  }
+
+  .btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+  }
+
+  .btn:active:not(:disabled) {
+    transform: translateY(1px) scale(0.985);
+  }
+
+
+  .btn-primary::after,
+  .icon-btn-primary::after {
+    content: "";
+    @apply absolute inset-y-0 w-1/3 opacity-0;
+    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.25), transparent);
+    transform: translateX(-150%) skewX(-15deg);
+    transition: none;
+  }
+
+  .btn-primary:hover:not(:disabled)::after,
+  .icon-btn-primary:hover:not(:disabled)::after {
+    opacity: 1;
+    animation: button-sweep 0.8s ease-in-out forwards;
   }
 
   .btn-primary {
@@ -325,7 +397,8 @@
   }
 
   .btn-primary:active:not(:disabled) {
-    @apply scale-[0.985] brightness-95;
+    @apply brightness-95;
+    box-shadow: 0 0 10px -4px rgb(var(--c-accent) / 0.5);
   }
 
   .btn-secondary {
@@ -333,11 +406,11 @@
   }
 
   .btn-secondary:hover:not(:disabled) {
-    @apply border-line-strong bg-surface-3;
+    @apply border-line-strong bg-surface-3 shadow-elevated;
   }
 
   .btn-secondary:active:not(:disabled) {
-    @apply scale-[0.985] bg-surface-4;
+    @apply bg-surface-4 shadow-subtle;
   }
 
   .btn-ghost {
@@ -365,25 +438,36 @@
     @apply rounded-lg px-5 text-body;
     min-height: 3rem;
   }
+
   /* -- Icon buttons: 40px hit area everywhere, incl. touch --------------- */
   .icon-btn {
-    @apply inline-flex shrink-0 items-center justify-center rounded-md text-ink-dim
-      transition-colors duration-fast ease-standard
+    @apply relative overflow-hidden inline-flex shrink-0 items-center justify-center rounded-md text-ink-dim
+      transition-all duration-fast ease-standard
       hover:bg-surface-3 hover:text-ink
       disabled:pointer-events-none disabled:opacity-40;
     width: 2.25rem;
     height: 2.25rem;
   }
 
-  .icon-btn-danger:hover {
-    @apply bg-danger/15 text-danger;
+  .icon-btn:hover:not(:disabled) {
+    transform: translateY(-1px);
+    @apply shadow-subtle;
   }
 
-  .icon-btn-accent:hover {
-    @apply bg-accent/15 text-accent;
+  .icon-btn:active:not(:disabled) {
+    transform: translateY(1px) scale(0.96);
+    @apply shadow-none bg-surface-4;
   }
 
-  /* Filled icon button for the one primary action in a compact context */
+  .icon-btn-danger:hover:not(:disabled) {
+    @apply bg-danger/15 text-danger border border-danger/20;
+  }
+
+  .icon-btn-accent:hover:not(:disabled) {
+    @apply bg-accent/15 text-accent border border-accent/20;
+  }
+
+  /* Filled icon button */
   .icon-btn-primary {
     @apply text-ink-inverse shadow-glow-sm;
     background-image: linear-gradient(135deg, rgb(var(--c-accent-soft)) 0%, rgb(var(--c-accent)) 45%, rgb(var(--c-azure)) 100%);
@@ -395,7 +479,8 @@
   }
 
   .icon-btn-primary:active:not(:disabled) {
-    @apply scale-[0.96];
+    /* Transform handled by base */
+    box-shadow: 0 0 10px -4px rgb(var(--c-accent) / 0.5);
   }
 
   /* -- Surfaces ---------------------------------------------------------- */

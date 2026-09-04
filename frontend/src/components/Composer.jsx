@@ -149,7 +149,7 @@ const Composer = ({
             <button
               type="button"
               onClick={onOpenKnowledgeBase}
-              className="tip inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-cap text-ink-dim transition-colors duration-fast ease-standard hover:bg-surface-3 hover:text-ink"
+              className="tip inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-cap text-ink-dim transition-all duration-fast ease-standard hover:-translate-y-px hover:shadow-subtle hover:bg-surface-3 hover:text-ink"
               data-tip="Open knowledge base"
               aria-label={`Open knowledge base, ${pluralize(documentCount, 'document')} indexed`}
             >

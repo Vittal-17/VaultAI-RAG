@@ -184,8 +184,8 @@ const Sidebar = ({
       <li key={chat.chat_id}>
         <div
           className={clsx(
-            'group relative flex items-center gap-1 rounded-md pl-2.5 pr-1.5 transition-colors duration-fast ease-standard',
-            isActive ? 'active-rule bg-surface-3 text-ink' : 'text-ink-dim hover:bg-surface-2 hover:text-ink',
+            'group relative flex items-center gap-1 rounded-md pl-2.5 pr-1.5 transition-all duration-fast ease-standard hover:-translate-y-px hover:shadow-subtle',
+            isActive ? 'active-rule bg-surface-3 text-ink shadow-subtle' : 'text-ink-dim hover:bg-surface-3/60 hover:text-ink',
             isConfirming && 'bg-danger/10'
           )}
         >

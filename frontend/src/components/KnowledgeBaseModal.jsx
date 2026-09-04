@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import { FileText, Library, Loader2, Search, Trash2 } from 'lucide-react';
+import clsx from 'clsx';
 import Modal from './ui/Modal';
 import FileUpload from './FileUpload';
 import { pluralize, splitFilename } from '../lib/format';
@@ -158,7 +159,7 @@ const KnowledgeBaseModal = ({ isOpen, onClose, documents, onUploaded, onRemoved 
 
             return (
               <li key={filename}>
-                <div className="group/doc flex items-center gap-2.5 rounded-lg border border-line-subtle bg-surface-2/60 px-3 py-2.5 transition-colors duration-fast ease-standard hover:border-line hover:bg-surface-2/90">
+                <div className={clsx('group/doc flex items-center gap-2.5 rounded-lg border border-line-subtle bg-surface-2/60 px-3 py-2.5 transition-all duration-fast ease-standard hover:shadow-subtle hover:-translate-y-px hover:border-line-strong hover:bg-surface-3/90', armed && 'border-danger/40 bg-danger/5', busy && 'opacity-50 grayscale')}>
                   <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-line bg-surface-3/70 text-accent">
                     <FileText className="h-4 w-4" aria-hidden="true" />
                   </span>

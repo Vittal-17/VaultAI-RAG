@@ -138,8 +138,8 @@ const ProviderSelector = ({
 
   const itemClass = (checked) =>
     clsx(
-      'flex w-full items-center justify-between gap-2 rounded-sm px-2 py-2 text-left text-cap transition-colors duration-fast ease-standard',
-      checked ? 'bg-accent/10 font-medium text-accent' : 'text-ink-dim hover:bg-surface-3 hover:text-ink'
+      'group flex w-full items-center justify-between gap-2 rounded-sm px-2 py-2 text-left text-cap transition-all duration-fast ease-standard hover:-translate-y-px',
+      checked ? 'bg-accent/10 font-medium text-accent shadow-subtle' : 'text-ink-dim hover:bg-surface-3 hover:text-ink hover:shadow-subtle'
     );
 
   return (

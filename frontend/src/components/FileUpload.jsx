@@ -138,14 +138,14 @@ const FileUpload = ({ onUploaded }) => {
           'flex w-full flex-col items-center gap-1 rounded-lg border border-dashed px-4 py-6 text-center',
           'transition-all duration-fast ease-standard',
           dragging
-            ? 'border-accent/70 bg-accent/10 shadow-glow-sm'
-            : 'border-line-strong bg-surface-2/40 hover:border-accent/45 hover:bg-surface-2/70'
+            ? 'border-accent/70 bg-accent/10 shadow-glow-sm scale-[1.02]'
+            : 'border-line-strong bg-surface-2/40 hover:border-accent/45 hover:bg-surface-2/70 hover:shadow-subtle hover:-translate-y-px'
         )}
       >
         <span
           className={clsx(
             'mb-1 grid h-10 w-10 place-items-center rounded-md border text-accent transition-colors duration-fast',
-            dragging ? 'border-accent/50 bg-accent/15' : 'border-line bg-surface-3/70'
+            dragging ? 'border-accent/50 bg-accent/15 scale-110' : 'border-line bg-surface-3/70'
           )}
         >
           <UploadCloud className="h-5 w-5" aria-hidden="true" />

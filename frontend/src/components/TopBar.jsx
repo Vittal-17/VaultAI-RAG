@@ -2,6 +2,7 @@ import React from 'react';
 import { Database, Menu } from 'lucide-react';
 import clsx from 'clsx';
 import ProviderSelector from './ProviderSelector';
+import ThemeSelector from './ThemeSelector';
 import { pluralize } from '../lib/format';
 
 /**
@@ -35,7 +36,7 @@ const TopBar = ({
         type="button"
         onClick={onOpenKnowledgeBase}
         className={clsx(
-          'chip tip tip-below transition-colors duration-fast ease-standard hover:border-accent/40 hover:text-ink',
+          'chip tip tip-below transition-all duration-fast ease-standard hover:-translate-y-px hover:shadow-subtle hover:border-accent/40 hover:text-ink',
           documentCount > 0 && 'text-ink'
         )}
         data-tip={`${pluralize(documentCount, 'document')} indexed`}
@@ -46,6 +47,7 @@ const TopBar = ({
       </button>
 
       <ProviderSelector {...providers} compact={!isDesktop} />
+      <ThemeSelector compact={!isDesktop} />
     </div>
   </header>
 );

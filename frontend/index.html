@@ -4,22 +4,35 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="color-scheme" content="dark" />
-    <meta name="theme-color" content="#02060e" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f8fcff" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#02060e" />
     <meta
       name="description"
       content="CYPHR — an intelligent knowledge workspace. Add your documents, then ask questions and get answers cited back to the source."
     />
     <title>CYPHR — Intelligent Knowledge Workspace</title>
-    <style>
-      /* Painted before the bundle loads so there is never a white flash. */
-      html,
-      body {
-        margin: 0;
-        height: 100%;
-        background-color: #02060e;
-      }
-    </style>
+
+
+    <script>
+      (function() {
+        try {
+          var theme = localStorage.getItem('cyphr-theme');
+          var systemDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          if (theme === 'dark' || (theme === 'system' && systemDark)) {
+            document.documentElement.setAttribute('data-theme', 'dark');
+            document.documentElement.style.backgroundColor = '#02060e';
+          } else if (theme === 'light' || (theme === 'system' && !systemDark) || !theme) {
+            document.documentElement.setAttribute('data-theme', 'light');
+            document.documentElement.style.backgroundColor = '#f8fcff';
+            // Default to light if no theme is set
+            if (!theme) {
+               localStorage.setItem('cyphr-theme', 'light');
+            }
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 import { GoogleLogin } from '@react-oauth/google';
+import { useTheme } from '../hooks/useTheme';
 import {
   AlertTriangle,
   Eye,
@@ -54,6 +55,7 @@ const CAPABILITIES = [
  * register-time confirmation, which exists purely to catch typing mistakes.
  */
 const AuthScreen = ({ onAuthSuccess }) => {
+  const currentTheme = useTheme();
   const [isLogin, setIsLogin] = useState(true);
   const [form, setForm] = useState(EMPTY_FORM);
   const [showPassword, setShowPassword] = useState(false);
@@ -227,8 +229,8 @@ const AuthScreen = ({ onAuthSuccess }) => {
                     className={clsx(
                       'rounded-md py-2 text-cap font-semibold transition-all duration-fast ease-standard',
                       isLogin === login
-                        ? 'border border-accent/30 bg-accent/10 text-accent'
-                        : 'border border-transparent text-ink-dim hover:bg-surface-3/60 hover:text-ink'
+                        ? 'border border-accent/30 bg-accent/10 text-accent shadow-subtle'
+                        : 'border border-transparent text-ink-dim hover:bg-surface-3/60 hover:text-ink hover:-translate-y-px'
                     )}
                   >
                     {label}
@@ -365,7 +367,7 @@ const AuthScreen = ({ onAuthSuccess }) => {
                 <GoogleLogin
                   onSuccess={handleGoogle}
                   onError={() => setError('Google sign-in could not be completed.')}
-                  theme="filled_black"
+                  theme={currentTheme === "dark" ? "filled_black" : "outline"}
                   size="large"
                   shape="rectangular"
                   text={isLogin ? 'signin_with' : 'signup_with'}
