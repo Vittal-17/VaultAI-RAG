@@ -255,7 +255,7 @@ async def register(request: Request, body_req: RegisterRequest, response: Respon
         "fullname": request.fullname,
         "email": request.email,
         "hashed_password": hashed_password,
-        "created_at": datetime.utcnow()
+        "created_at": datetime.now(timezone.utc)
     }
 
     await users_collection.insert_one(user_doc)
@@ -394,7 +394,7 @@ async def create_new_chat(request: Request, current_user: dict = Depends(get_cur
         "chat_id": chat_id,
         "user_email": current_user["email"],
         "title": "New Conversation",
-        "created_at": datetime.utcnow(),
+        "created_at": datetime.now(timezone.utc),
         "messages": []
     }
     await chats_collection.insert_one(chat_doc)
@@ -506,8 +506,8 @@ async def chat(request: Request, body_req: ChatRequest, current_user: dict = Dep
         answer = await generate_chat_response(request.message, current_user["email"], provider_id=request.provider, model_id=request.model)
 
         # Update chat thread
-        user_msg = {"role": "user", "content": request.message, "timestamp": datetime.utcnow()}
-        assistant_msg = {"role": "assistant", "content": answer, "timestamp": datetime.utcnow()}
+        user_msg = {"role": "user", "content": request.message, "timestamp": datetime.now(timezone.utc)}
+        assistant_msg = {"role": "assistant", "content": answer, "timestamp": datetime.now(timezone.utc)}
 
         await chats_collection.update_one(
             {"chat_id": chat_id, "user_email": current_user["email"]},

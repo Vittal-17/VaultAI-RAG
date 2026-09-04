@@ -600,6 +600,9 @@
    ========================================================================== */
 
 .md {
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
   @apply text-body text-ink/95;
 }
 
@@ -691,6 +694,8 @@
 }
 
 .md pre code {
+  word-break: normal;
+  overflow-wrap: normal;
   @apply block font-mono text-code text-ink/90;
   background: none;
   border: 0;

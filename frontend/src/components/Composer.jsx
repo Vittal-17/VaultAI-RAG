@@ -86,7 +86,7 @@ const Composer = ({
   const uploadName = upload.file ? splitFilename(upload.file.name).stem : '';
 
   return (
-    <div className="relative shrink-0 bg-gradient-to-t from-surface-0 via-surface-0/90 to-transparent px-3 pb-3 pt-6 sm:px-6 sm:pb-4">
+    <div className="relative shrink-0 bg-gradient-to-t from-surface-0 via-surface-0/90 to-transparent px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-6 sm:px-6 sm:pb-4">
       <div className="mx-auto w-full max-w-composer">
         <form
           onSubmit={submit}

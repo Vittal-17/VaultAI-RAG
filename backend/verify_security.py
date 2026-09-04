@@ -11,7 +11,38 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from main import app
 from services import generate_chat_response, generate_auto_title
 
+
+import contextlib
+
+@contextlib.contextmanager
+def temporary_cookies(test_client, new_cookies):
+    """
+    Temporarily add cookies to a TestClient.
+    Preserves existing cookies, sets the new ones, and restores original state after execution.
+    """
+    if not new_cookies:
+        yield
+        return
+
+    old_cookies = list(test_client.cookies.jar)
+    test_client.cookies.jar.clear()
+
+    for cookie in old_cookies:
+        if cookie.name not in new_cookies:
+            test_client.cookies.jar.set_cookie(cookie)
+
+    for name, value in new_cookies.items():
+        test_client.cookies.set(name, value)
+
+    try:
+        yield
+    finally:
+        test_client.cookies.jar.clear()
+        for cookie in old_cookies:
+            test_client.cookies.jar.set_cookie(cookie)
+
 client = TestClient(app)
+
 
 class TestCYPHRSecurityAndRAG(unittest.IsolatedAsyncioTestCase):
 
@@ -29,12 +60,12 @@ class TestCYPHRSecurityAndRAG(unittest.IsolatedAsyncioTestCase):
         app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
         csrf_token = "mock-csrf-token"
 
-        response = client.post(
-            "/chat",
-            json={"message": "Test message", "chat_id": "fake-123", "provider": "tokenforge", "model": "claude-fable-5"},
-            cookies={"csrf_token": csrf_token},
-            headers={"X-CSRF-Token": csrf_token}
-        )
+        with temporary_cookies(client, {"csrf_token": csrf_token}):
+            response = client.post(
+                "/chat",
+                json={"message": "Test message", "chat_id": "fake-123", "provider": "tokenforge", "model": "claude-fable-5"},
+                headers={"X-CSRF-Token": csrf_token}
+            )
 
         self.assertEqual(response.status_code, 200)
 
@@ -90,12 +121,12 @@ class TestCYPHRSecurityAndRAG(unittest.IsolatedAsyncioTestCase):
             mock_generate_chat.reset_mock()
             mock_auto_title.reset_mock()
 
-            response = client.post(
-                "/chat",
-                json={"message": "Test message", "provider": prov, "model": mod},
-                cookies={"csrf_token": csrf_token},
-                headers={"X-CSRF-Token": csrf_token}
-            )
+            with temporary_cookies(client, {"csrf_token": csrf_token}):
+                response = client.post(
+                    "/chat",
+                    json={"message": "Test message", "provider": prov, "model": mod},
+                    headers={"X-CSRF-Token": csrf_token}
+                )
 
             self.assertEqual(response.status_code, 200)
 
@@ -125,6 +156,7 @@ import main
 from fastapi.testclient import TestClient
 
 client = TestClient(main.app)
+
 response = client.get('/api/csrf')
 set_cookie = response.headers.get('set-cookie', '')
 print("SET_COOKIE:", set_cookie)
@@ -312,7 +344,8 @@ print("SET_COOKIE:", set_cookie)
         from main import get_current_user
         app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
 
-        response = client.post("/chat", json={"message": "Crash it"}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
+        with temporary_cookies(client, {'csrf_token': 'abc'}):
+            response = client.post("/chat", json={"message": "Crash it"}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
 
         app.dependency_overrides = {}
         self.assertEqual(response.status_code, 500)
@@ -332,16 +365,16 @@ print("SET_COOKIE:", set_cookie)
         from main import get_current_user
         app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
         csrf_token = "mock-csrf-token"
-        response = client.post(
-            "/chat",
-            json={
+        with temporary_cookies(client, {"csrf_token": csrf_token}):
+            response = client.post(
+                "/chat",
+                json={
                 "message": "Hello",
                 "provider": "groq",
                 "model": "openai/gpt-oss-120b"
-            },
-            cookies={"csrf_token": csrf_token},
-            headers={"X-CSRF-Token": csrf_token}
-        )
+                },
+                headers={"X-CSRF-Token": csrf_token}
+            )
         self.assertEqual(response.status_code, 200)
         mock_generate_chat.assert_called_once_with(
             "Hello",
@@ -353,12 +386,12 @@ print("SET_COOKIE:", set_cookie)
 
         # Test default fallback when omitted
         mock_generate_chat.reset_mock()
-        response2 = client.post(
-            "/chat",
-            json={"message": "Hello2"},
-            cookies={"csrf_token": csrf_token},
-            headers={"X-CSRF-Token": csrf_token}
-        )
+        with temporary_cookies(client, {"csrf_token": csrf_token}):
+            response2 = client.post(
+                "/chat",
+                json={"message": "Hello2"},
+                headers={"X-CSRF-Token": csrf_token}
+            )
         self.assertEqual(response2.status_code, 200)
         mock_generate_chat.assert_called_once_with(
             "Hello2",
@@ -394,7 +427,8 @@ print("SET_COOKIE:", set_cookie)
 
     def test_10_csrf_post_incorrect_token(self):
         """5. POST with incorrect CSRF token"""
-        response = client.post('/api/logout', cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'def'})
+        with temporary_cookies(client, {'csrf_token': 'abc'}):
+            response = client.post('/api/logout', headers={'X-CSRF-Token': 'def'})
         self.assertEqual(response.status_code, 403)
 
     @patch("main.chats_collection.insert_one", new_callable=AsyncMock)
@@ -405,23 +439,27 @@ print("SET_COOKIE:", set_cookie)
         # mock auth
         from main import get_current_user
         app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
-        response = client.post('/api/chats/new', cookies=cookies, headers=headers)
+        with temporary_cookies(client, cookies):
+            response = client.post('/api/chats/new', headers=headers)
         app.dependency_overrides = {}
         self.assertEqual(response.status_code, 200)
 
     def test_12_csrf_missing_header(self):
         """9. Correct token in cookie but missing header"""
-        response = client.post('/api/logout', cookies={'csrf_token': 'abc'})
+        with temporary_cookies(client, {'csrf_token': 'abc'}):
+            response = client.post('/api/logout')
         self.assertEqual(response.status_code, 403)
 
     def test_13_csrf_mismatched_cookie(self):
         """10. Correct header but mismatched cookie"""
-        response = client.post('/api/logout', cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'xyz'})
+        with temporary_cookies(client, {'csrf_token': 'abc'}):
+            response = client.post('/api/logout', headers={'X-CSRF-Token': 'xyz'})
         self.assertEqual(response.status_code, 403)
 
     def test_14_invalid_origin(self):
         """11. Invalid Origin"""
-        response = client.post('/api/logout', cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://evil.com'})
+        with temporary_cookies(client, {'csrf_token': 'abc'}):
+            response = client.post('/api/logout', headers={'X-CSRF-Token': 'abc', 'Origin': 'http://evil.com'})
         self.assertEqual(response.status_code, 403)
 
     def test_15_options_preflight(self):
@@ -441,7 +479,8 @@ print("SET_COOKIE:", set_cookie)
         orig_max = main.MAX_PDF_SIZE_BYTES
         main.MAX_PDF_SIZE_BYTES = 100 # 100 bytes limit
 
-        response = client.post('/upload', files={'file': ('test.pdf', b'A'*150, 'application/pdf')}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
+        with temporary_cookies(client, {'csrf_token': 'abc'}):
+            response = client.post('/upload', files={'file': ('test.pdf', b'A'*150, 'application/pdf')}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
 
         main.MAX_PDF_SIZE_BYTES = orig_max
         app.dependency_overrides = {}
@@ -455,7 +494,8 @@ print("SET_COOKIE:", set_cookie)
         from main import get_current_user
         app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
 
-        response = client.post('/upload', files={'file': ('test.txt', b'abc', 'text/plain')}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
+        with temporary_cookies(client, {'csrf_token': 'abc'}):
+            response = client.post('/upload', files={'file': ('test.txt', b'abc', 'text/plain')}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
         app.dependency_overrides = {}
 
         self.assertEqual(response.status_code, 400)
@@ -468,7 +508,8 @@ print("SET_COOKIE:", set_cookie)
         app.dependency_overrides[get_current_user] = lambda: {"email": "user@test.com"}
         mock_pdfreader.side_effect = Exception("corrupt")
 
-        response = client.post('/upload', files={'file': ('test.pdf', b'bad', 'application/pdf')}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
+        with temporary_cookies(client, {'csrf_token': 'abc'}):
+            response = client.post('/upload', files={'file': ('test.pdf', b'bad', 'application/pdf')}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
         app.dependency_overrides = {}
 
         self.assertEqual(response.status_code, 400)
@@ -484,7 +525,8 @@ print("SET_COOKIE:", set_cookie)
         mock_reader_instance.pages = [MagicMock()] * 201
         mock_pdfreader.return_value = mock_reader_instance
 
-        response = client.post('/upload', files={'file': ('test.pdf', b'bad', 'application/pdf')}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
+        with temporary_cookies(client, {'csrf_token': 'abc'}):
+            response = client.post('/upload', files={'file': ('test.pdf', b'bad', 'application/pdf')}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
         app.dependency_overrides = {}
 
         self.assertEqual(response.status_code, 413)
@@ -502,7 +544,8 @@ print("SET_COOKIE:", set_cookie)
         mock_reader_instance.pages = [mock_page]
         mock_pdfreader.return_value = mock_reader_instance
 
-        response = client.post('/upload', files={'file': ('test.pdf', b'bad', 'application/pdf')}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
+        with temporary_cookies(client, {'csrf_token': 'abc'}):
+            response = client.post('/upload', files={'file': ('test.pdf', b'bad', 'application/pdf')}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
         app.dependency_overrides = {}
 
         self.assertEqual(response.status_code, 400)
@@ -521,7 +564,8 @@ print("SET_COOKIE:", set_cookie)
         mock_reader_instance.pages = [mock_page]
         mock_pdfreader.return_value = mock_reader_instance
 
-        response = client.post('/upload', files={'file': ('test.pdf', b'bad', 'application/pdf')}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
+        with temporary_cookies(client, {'csrf_token': 'abc'}):
+            response = client.post('/upload', files={'file': ('test.pdf', b'bad', 'application/pdf')}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
         app.dependency_overrides = {}
 
         self.assertEqual(response.status_code, 413)
@@ -542,7 +586,8 @@ print("SET_COOKIE:", set_cookie)
 
         mock_embed.side_effect = Exception("API Timeout")
 
-        response = client.post('/upload', files={'file': ('test.pdf', b'bad', 'application/pdf')}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
+        with temporary_cookies(client, {'csrf_token': 'abc'}):
+            response = client.post('/upload', files={'file': ('test.pdf', b'bad', 'application/pdf')}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
         app.dependency_overrides = {}
 
         self.assertEqual(response.status_code, 500)
@@ -567,7 +612,8 @@ print("SET_COOKIE:", set_cookie)
 
         mock_insert.side_effect = Exception("DB Down")
 
-        response = client.post('/upload', files={'file': ('test.pdf', b'bad', 'application/pdf')}, cookies={'csrf_token': 'abc'}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
+        with temporary_cookies(client, {'csrf_token': 'abc'}):
+            response = client.post('/upload', files={'file': ('test.pdf', b'bad', 'application/pdf')}, headers={'X-CSRF-Token': 'abc', 'Origin': 'http://localhost:5173'})
         app.dependency_overrides = {}
 
         self.assertEqual(response.status_code, 500)
@@ -585,14 +631,15 @@ print("SET_COOKIE:", set_cookie)
             cookies = {'csrf_token': 'rl_token'}
             headers = {'X-CSRF-Token': 'rl_token', 'Origin': 'http://localhost:5173', 'X-Forwarded-For': '192.168.1.1'}
 
-            # 10 allowed
-            for _ in range(10):
-                res = client.post('/api/login', json={"email": "t@t.com", "password": "1"}, cookies=cookies, headers=headers)
-                self.assertEqual(res.status_code, 401)
+            with temporary_cookies(client, cookies):
+                # 10 allowed
+                for _ in range(10):
+                    res = client.post('/api/login', json={"email": "t@t.com", "password": "1"}, headers=headers)
+                    self.assertEqual(res.status_code, 401)
 
-            # 11th should be 429
-            res = client.post('/api/login', json={"email": "t@t.com", "password": "1"}, cookies=cookies, headers=headers)
-            self.assertEqual(res.status_code, 429)
+                # 11th should be 429
+                res = client.post('/api/login', json={"email": "t@t.com", "password": "1"}, headers=headers)
+                self.assertEqual(res.status_code, 429)
             self.assertIn("Too many login attempts", res.json()["detail"])
             self.assertIn("retry-after", res.headers)
             self.assertTrue(res.headers["retry-after"].isdigit())
@@ -615,14 +662,15 @@ print("SET_COOKIE:", set_cookie)
         # User A hits 20 chats
         app.dependency_overrides[get_current_user] = lambda: {"email": "userA@test.com"}
         with patch('auth.decode_access_token', return_value={"sub": "userA@test.com"}):
-            for _ in range(20):
-                res = client.post('/chat', json={"message": "hi", "chat_id": "1"}, cookies=cookies, headers=headers)
-                self.assertEqual(res.status_code, 200)
+            with temporary_cookies(client, cookies):
+                for _ in range(20):
+                    res = client.post('/chat', json={"message": "hi", "chat_id": "1"}, headers=headers)
+                    self.assertEqual(res.status_code, 200)
 
-            # 21st should be 429 and downstream not called
-            mock_gen.reset_mock()
-            res = client.post('/chat', json={"message": "hi", "chat_id": "1"}, cookies=cookies, headers=headers)
-            self.assertEqual(res.status_code, 429)
+                # 21st should be 429 and downstream not called
+                mock_gen.reset_mock()
+                res = client.post('/chat', json={"message": "hi", "chat_id": "1"}, headers=headers)
+                self.assertEqual(res.status_code, 429)
             self.assertIn("Too many chat requests", res.json()["detail"])
             self.assertIn("retry-after", res.headers)
             self.assertTrue(res.headers["retry-after"].isdigit())
@@ -632,8 +680,9 @@ print("SET_COOKIE:", set_cookie)
         # User B should still be allowed
         app.dependency_overrides[get_current_user] = lambda: {"email": "userB@test.com"}
         with patch('auth.decode_access_token', return_value={"sub": "userB@test.com"}):
-            res = client.post('/chat', json={"message": "hi", "chat_id": "1"}, cookies=cookies, headers=headers)
-            self.assertEqual(res.status_code, 200)
+            with temporary_cookies(client, cookies):
+                res = client.post('/chat', json={"message": "hi", "chat_id": "1"}, headers=headers)
+                self.assertEqual(res.status_code, 200)
 
         app.dependency_overrides = {}
 
@@ -649,13 +698,14 @@ print("SET_COOKIE:", set_cookie)
         app.dependency_overrides[get_current_user] = lambda: {"email": "upload@test.com"}
 
         with patch('auth.decode_access_token', return_value={"sub": "upload@test.com"}):
-            for _ in range(10):
-                res = client.post('/upload', files={'file': ('test.pdf', b'fake', 'application/pdf')}, cookies=cookies, headers=headers)
-                self.assertEqual(res.status_code, 200)
+            with temporary_cookies(client, cookies):
+                for _ in range(10):
+                    res = client.post('/upload', files={'file': ('test.pdf', b'fake', 'application/pdf')}, headers=headers)
+                    self.assertEqual(res.status_code, 200)
 
-            mock_process.reset_mock()
-            res = client.post('/upload', files={'file': ('test.pdf', b'fake', 'application/pdf')}, cookies=cookies, headers=headers)
-            self.assertEqual(res.status_code, 429)
+                mock_process.reset_mock()
+                res = client.post('/upload', files={'file': ('test.pdf', b'fake', 'application/pdf')}, headers=headers)
+                self.assertEqual(res.status_code, 429)
             self.assertIn("Upload rate limit exceeded", res.json()["detail"])
             self.assertIn("retry-after", res.headers)
             self.assertTrue(res.headers["retry-after"].isdigit())
@@ -677,7 +727,8 @@ print("SET_COOKIE:", set_cookie)
         headers = {"x-csrf-token": "dummy_csrf"}
         cookies = {"access_token": "dummy_jwt", "csrf_token": "dummy_csrf"}
 
-        response = client.post("/chat", json={"message": "hello", "chat_id": "nonexistent_chat"}, headers=headers, cookies=cookies)
+        with temporary_cookies(client, cookies):
+            response = client.post("/chat", json={"message": "hello", "chat_id": "nonexistent_chat"}, headers=headers)
 
         self.assertEqual(response.status_code, 404)
         self.assertIn("Chat not found", response.json()["detail"])
@@ -695,7 +746,8 @@ print("SET_COOKIE:", set_cookie)
         headers = {"x-csrf-token": "dummy_csrf"}
         cookies = {"access_token": "dummy_jwt", "csrf_token": "dummy_csrf"}
 
-        response = client.post("/chat", json={"message": "hello", "chat_id": "existing_chat"}, headers=headers, cookies=cookies)
+        with temporary_cookies(client, cookies):
+            response = client.post("/chat", json={"message": "hello", "chat_id": "existing_chat"}, headers=headers)
 
         self.assertEqual(response.status_code, 500)
         self.assertIn("Failed to generate response. Please try again.", response.json()["detail"])
@@ -727,7 +779,8 @@ print("SET_COOKIE:", set_cookie)
         res_csrf = client.get('/api/csrf')
         token = res_csrf.json()['csrf_token']
 
-        response = client.post('/api/register', json={"fullname": "test", "email": "new@test.com", "password": "123"}, cookies={'csrf_token': token}, headers={'X-CSRF-Token': token, 'Origin': 'http://localhost:5173'})
+        with temporary_cookies(client, {'csrf_token': token}):
+            response = client.post('/api/register', json={"fullname": "test", "email": "new@test.com", "password": "123"}, headers={'X-CSRF-Token': token, 'Origin': 'http://localhost:5173'})
         set_cookies = response.headers.get_list('set-cookie')
         access_cookie = next(c for c in set_cookies if c.startswith('access_token='))
 
@@ -746,7 +799,8 @@ print("SET_COOKIE:", set_cookie)
         res_csrf = client.get('/api/csrf')
         token = res_csrf.json()['csrf_token']
 
-        response = client.post('/api/register', json={"fullname": "test", "email": "new2@test.com", "password": "123"}, cookies={'csrf_token': token}, headers={'X-CSRF-Token': token, 'Origin': 'http://localhost:5173'})
+        with temporary_cookies(client, {'csrf_token': token}):
+            response = client.post('/api/register', json={"fullname": "test", "email": "new2@test.com", "password": "123"}, headers={'X-CSRF-Token': token, 'Origin': 'http://localhost:5173'})
         set_cookies = response.headers.get_list('set-cookie')
         access_cookie = next(c for c in set_cookies if c.startswith('access_token='))
         self.assertIn('samesite=none', access_cookie.lower())
@@ -839,12 +893,10 @@ print(main.IS_PRODUCTION)
         self.assertIn('none', result3.stdout)
         self.assertIn('True', result3.stdout)
 
-
-
-
     def test_33_logout_cookie_deletion(self):
         # 5. LOGOUT COOKIE DELETION
-        response = client.post('/api/logout', cookies={'csrf_token': 'rl_token'}, headers={'X-CSRF-Token': 'rl_token', 'Origin': 'http://localhost:5173'})
+        with temporary_cookies(client, {'csrf_token': 'rl_token'}):
+            response = client.post('/api/logout', headers={'X-CSRF-Token': 'rl_token', 'Origin': 'http://localhost:5173'})
         set_cookies = response.headers.get_list('set-cookie')
 
         access_deleted = next((c for c in set_cookies if c.startswith('access_token=')), None)
@@ -887,7 +939,8 @@ print(main.IS_PRODUCTION)
 
         self.assertEqual(json_token, cookie_token)
 
-        response2 = client.post('/api/logout', cookies={'csrf_token': cookie_token}, headers={'X-CSRF-Token': cookie_token, 'Origin': 'http://localhost:5173'})
+        with temporary_cookies(client, {'csrf_token': cookie_token}):
+            response2 = client.post('/api/logout', headers={'X-CSRF-Token': cookie_token, 'Origin': 'http://localhost:5173'})
         self.assertEqual(response2.status_code, 200)
 
     @patch('main.id_token.verify_oauth2_token')
@@ -900,18 +953,21 @@ print(main.IS_PRODUCTION)
 
         # Unverified email
         mock_verify.return_value = {"email": "test@example.com", "name": "Test", "email_verified": False}
-        response = client.post('/api/auth/google', json={"credential": "fake"}, headers={'Origin': 'http://localhost:5173', 'X-CSRF-Token': 'a'}, cookies={'csrf_token': 'a'})
+        with temporary_cookies(client, {'csrf_token': 'a'}):
+            response = client.post('/api/auth/google', json={"credential": "fake"}, headers={'Origin': 'http://localhost:5173', 'X-CSRF-Token': 'a'})
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json()["detail"], "Invalid Google token")
 
         # Missing email_verified
         mock_verify.return_value = {"email": "test@example.com", "name": "Test"}
-        response2 = client.post('/api/auth/google', json={"credential": "fake"}, headers={'Origin': 'http://localhost:5173', 'X-CSRF-Token': 'a'}, cookies={'csrf_token': 'a'})
+        with temporary_cookies(client, {'csrf_token': 'a'}):
+            response2 = client.post('/api/auth/google', json={"credential": "fake"}, headers={'Origin': 'http://localhost:5173', 'X-CSRF-Token': 'a'})
         self.assertEqual(response2.status_code, 401)
 
         # Verified email
         mock_verify.return_value = {"email": "test@example.com", "name": "Test", "email_verified": True}
-        response3 = client.post('/api/auth/google', json={"credential": "fake"}, headers={'Origin': 'http://localhost:5173', 'X-CSRF-Token': 'a'}, cookies={'csrf_token': 'a'})
+        with temporary_cookies(client, {'csrf_token': 'a'}):
+            response3 = client.post('/api/auth/google', json={"credential": "fake"}, headers={'Origin': 'http://localhost:5173', 'X-CSRF-Token': 'a'})
         self.assertEqual(response3.status_code, 200)
 
     @patch('main.verify_password')
@@ -922,7 +978,8 @@ print(main.IS_PRODUCTION)
         mock_find.side_effect = mock_none
         mock_verify.return_value = False
 
-        response = client.post('/api/login', json={"email": "nonexistent@test.com", "password": "abc"}, headers={'Origin': 'http://localhost:5173', 'X-CSRF-Token': 'a'}, cookies={'csrf_token': 'a'})
+        with temporary_cookies(client, {'csrf_token': 'a'}):
+            response = client.post('/api/login', json={"email": "nonexistent@test.com", "password": "abc"}, headers={'Origin': 'http://localhost:5173', 'X-CSRF-Token': 'a'})
         self.assertEqual(response.status_code, 401)
         self.assertTrue(mock_verify.called)
 
@@ -1584,9 +1641,6 @@ class TestCYPHRPatch8B2(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(embeddings.EmbeddingError) as ctx:
             await p.embed_documents(["a", "b"])
         self.assertIn("Invalid or out-of-bounds", str(ctx.exception))
-
-
-
 
 class TestCYPHRPatch8C(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -2432,8 +2486,6 @@ class TestProviderRegistry(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "is currently disabled"):
             llm_providers.get_provider_client("tokenforge", "claude-opus-5")
 
-
-
     @patch("main.chats_collection.find_one", new_callable=AsyncMock)
     @patch("main.chats_collection.find", new_callable=MagicMock)
     @patch("main.chats_collection.update_one", new_callable=AsyncMock)
@@ -2458,12 +2510,12 @@ class TestProviderRegistry(unittest.IsolatedAsyncioTestCase):
         mock_auto_title.return_value = "Generated Awesome Title"
 
         # 1. /chat generates the title
-        response = client.post(
-            "/chat",
-            json={"message": "First message", "chat_id": "fake-123", "provider": "tokenforge", "model": "claude-fable-5"},
-            cookies={"csrf_token": csrf_token},
-            headers={"X-CSRF-Token": csrf_token}
-        )
+        with temporary_cookies(client, {"csrf_token": csrf_token}):
+            response = client.post(
+                "/chat",
+                json={"message": "First message", "chat_id": "fake-123", "provider": "tokenforge", "model": "claude-fable-5"},
+                headers={"X-CSRF-Token": csrf_token}
+            )
         self.assertEqual(response.status_code, 200)
 
         # a. generate_auto_title was called correctly
@@ -2484,18 +2536,17 @@ class TestProviderRegistry(unittest.IsolatedAsyncioTestCase):
         # d. GET /api/chats returns the persisted title
         response_chats = client.get(
             "/api/chats",
-            cookies={"csrf_token": csrf_token},
             headers={"X-CSRF-Token": csrf_token}
         )
         self.assertEqual(response_chats.status_code, 200)
         self.assertEqual(response_chats.json()[0]["title"], "Generated Awesome Title")
 
         # e. GET /api/chats/{chat_id} returns the persisted title
-        response_chat = client.get(
-            "/api/chats/fake-123",
-            cookies={"csrf_token": csrf_token},
-            headers={"X-CSRF-Token": csrf_token}
-        )
+        with temporary_cookies(client, {"csrf_token": csrf_token}):
+            response_chat = client.get(
+                "/api/chats/fake-123",
+                headers={"X-CSRF-Token": csrf_token}
+            )
         self.assertEqual(response_chat.status_code, 200)
         self.assertEqual(response_chat.json()["title"], "Generated Awesome Title")
 
@@ -2514,12 +2565,12 @@ class TestProviderRegistry(unittest.IsolatedAsyncioTestCase):
         mock_find_one.return_value = {"chat_id": "fake-123", "user_email": "user@test.com", "title": "Existing Title"}
         mock_generate_chat.return_value = "Mock answer"
 
-        response = client.post(
-            "/chat",
-            json={"message": "Subsequent message", "chat_id": "fake-123", "provider": "tokenforge", "model": "claude-fable-5"},
-            cookies={"csrf_token": csrf_token},
-            headers={"X-CSRF-Token": csrf_token}
-        )
+        with temporary_cookies(client, {"csrf_token": csrf_token}):
+            response = client.post(
+                "/chat",
+                json={"message": "Subsequent message", "chat_id": "fake-123", "provider": "tokenforge", "model": "claude-fable-5"},
+                headers={"X-CSRF-Token": csrf_token}
+            )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json().get("title"), "Existing Title")
 
@@ -2542,12 +2593,12 @@ class TestProviderRegistry(unittest.IsolatedAsyncioTestCase):
         mock_generate_chat.return_value = "Mock answer"
         mock_auto_title.return_value = "New Conversation" # Simulated fallback
 
-        response = client.post(
-            "/chat",
-            json={"message": "Test message", "chat_id": "fake-123", "provider": "tokenforge", "model": "claude-fable-5"},
-            cookies={"csrf_token": csrf_token},
-            headers={"X-CSRF-Token": csrf_token}
-        )
+        with temporary_cookies(client, {"csrf_token": csrf_token}):
+            response = client.post(
+                "/chat",
+                json={"message": "Test message", "chat_id": "fake-123", "provider": "tokenforge", "model": "claude-fable-5"},
+                headers={"X-CSRF-Token": csrf_token}
+            )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json().get("title"), "New Conversation")
@@ -2581,12 +2632,12 @@ class TestProviderRegistry(unittest.IsolatedAsyncioTestCase):
 
         mock_get_provider.return_value = (mock_client, 'groq', 'openai/gpt-oss-20b')
 
-        response = client.post(
-            "/chat",
-            json={"message": "Test message", "chat_id": "fake-123", "provider": "tokenforge", "model": "claude-fable-5"},
-            cookies={"csrf_token": csrf_token},
-            headers={"X-CSRF-Token": csrf_token}
-        )
+        with temporary_cookies(client, {"csrf_token": csrf_token}):
+            response = client.post(
+                "/chat",
+                json={"message": "Test message", "chat_id": "fake-123", "provider": "tokenforge", "model": "claude-fable-5"},
+                headers={"X-CSRF-Token": csrf_token}
+            )
 
         self.assertEqual(response.status_code, 200)
         # Because content was empty string, generate_auto_title returns "New Conversation", skipping update
@@ -2619,12 +2670,12 @@ class TestProviderRegistry(unittest.IsolatedAsyncioTestCase):
 
         mock_get_provider.return_value = (mock_client, 'groq', 'openai/gpt-oss-20b')
 
-        response = client.post(
-            "/chat",
-            json={"message": "Tell me about printing", "chat_id": "fake-123", "provider": "tokenforge", "model": "claude-fable-5"},
-            cookies={"csrf_token": csrf_token},
-            headers={"X-CSRF-Token": csrf_token}
-        )
+        with temporary_cookies(client, {"csrf_token": csrf_token}):
+            response = client.post(
+                "/chat",
+                json={"message": "Tell me about printing", "chat_id": "fake-123", "provider": "tokenforge", "model": "claude-fable-5"},
+                headers={"X-CSRF-Token": csrf_token}
+            )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json().get("title"), "Printing History")

@@ -280,9 +280,9 @@ const Sidebar = ({
   };
 
   const shell = clsx(
-    'relative z-drawer flex h-full shrink-0 flex-col border-r border-line bg-surface-1/80 backdrop-blur-xl',
+    'z-drawer flex h-full shrink-0 flex-col border-r border-line bg-surface-1/80 backdrop-blur-xl',
     isDesktop
-      ? ['transition-[width] duration-emphasized ease-standard', isRail ? 'w-rail' : 'w-sidebar']
+      ? ['relative transition-[width] duration-emphasized ease-standard', isRail ? 'w-rail' : 'w-sidebar']
       : [
           'fixed inset-y-0 left-0 w-sidebar max-w-[85vw] shadow-panel',
           'transition-[transform,visibility] duration-emphasized ease-exit',
