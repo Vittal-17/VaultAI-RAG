@@ -1,56 +1,78 @@
-import React, { useState, useEffect } from 'react';
-import { Loader2 } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import clsx from 'clsx';
+import CyphrMark from './ui/CyphrMark';
 
-const messages = [
-  "Authenticating credentials...",
-  "Establishing secure enclave...",
-  "Decrypting session tokens...",
-  "Entering CYPHR Workspace..."
-];
+/** Keep in sync with the fade below, so the node leaves only after it is gone. */
+const EXIT_MS = 380;
 
+/**
+ * Full-viewport takeover shown while a session is being established — during
+ * sign-in and register, and while the app resolves `/api/me` on first paint.
+ *
+ * It states one thing and does not narrate steps it cannot observe: the client
+ * has no visibility into what the server is doing between the request and the
+ * response, so inventing a sequence of stages would be fiction. The concentric
+ * rings, the breathing mark, the sweeping hairline and every colour here are
+ * the same primitives the rest of the product already uses.
+ */
 const AuthLoadingOverlay = ({ isVisible }) => {
-  const [msgIndex, setMsgIndex] = useState(0);
-  const [show, setShow] = useState(isVisible);
-  const [isRendered, setIsRendered] = useState(isVisible);
+  const [mounted, setMounted] = useState(isVisible);
+  const [visible, setVisible] = useState(isVisible);
 
+  // Mount first, fade in on the next frame; on the way out, fade before
+  // unmounting. Both the frame and the timer are always cancelled.
   useEffect(() => {
     if (isVisible) {
-      setIsRendered(true);
-      setTimeout(() => setShow(true), 10);
-      setMsgIndex(0);
-    } else {
-      setShow(false);
-      const timer = setTimeout(() => setIsRendered(false), 500);
-      return () => clearTimeout(timer);
+      setMounted(true);
+      const frame = requestAnimationFrame(() => setVisible(true));
+      return () => cancelAnimationFrame(frame);
     }
+    setVisible(false);
+    const timer = setTimeout(() => setMounted(false), EXIT_MS);
+    return () => clearTimeout(timer);
   }, [isVisible]);
 
-  useEffect(() => {
-    if (!show) return;
-    const interval = setInterval(() => {
-      setMsgIndex((prev) => (prev + 1 < messages.length ? prev + 1 : prev));
-    }, 550);
-    return () => clearInterval(interval);
-  }, [show]);
-
-  if (!isRendered) return null;
+  if (!mounted) return null;
 
   return (
-    <div className={`fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/85 backdrop-blur-xl transition-all duration-500 ${show ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
-      <div className="relative flex flex-col items-center justify-center p-10 rounded-3xl border border-teal-500/20 bg-slate-900/50 shadow-2xl shadow-teal-500/10">
-        <div className="relative flex items-center justify-center w-32 h-32 mb-8">
-          {/* Outer Ring */}
-          <div className="absolute w-32 h-32 rounded-full border-t-2 border-r-2 border-teal-500 animate-[spin_3s_linear_infinite]"></div>
-          {/* Middle Ring */}
-          <div className="absolute w-24 h-24 rounded-full border-b-2 border-l-2 border-cyan-400 animate-[spin_2s_linear_infinite_reverse]"></div>
-          {/* Core Glow */}
-          <div className="absolute w-16 h-16 bg-gradient-to-tr from-cyan-500 to-emerald-500 rounded-full blur-md opacity-40 animate-pulse"></div>
-          {/* Icon */}
-          <Loader2 className="w-10 h-10 text-white animate-spin relative z-10" />
+    <div
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      className={clsx(
+        'fixed inset-0 z-overlay grid place-items-center bg-surface-0/90 px-6 backdrop-blur-xl',
+        'transition-opacity duration-emphasized',
+        visible ? 'pointer-events-auto opacity-100 ease-standard' : 'pointer-events-none opacity-0 ease-exit'
+      )}
+    >
+      <div className="flex flex-col items-center text-center">
+        {/* Concentric rings: structure rings hold the shape, arc rings carry the
+            motion. Reduced motion slows them rather than freezing them. */}
+        <div className="relative grid h-32 w-32 place-items-center">
+          <span className="absolute inset-0 rounded-pill border border-accent/15" aria-hidden="true" />
+          <span
+            className="absolute inset-0 animate-spin-slow rounded-pill border-2 border-transparent border-t-accent/80"
+            aria-hidden="true"
+          />
+          <span className="absolute inset-3 rounded-pill border border-line-strong/60" aria-hidden="true" />
+          <span
+            className="absolute inset-3 animate-spin-reverse rounded-pill border-2 border-transparent border-b-azure/70"
+            aria-hidden="true"
+          />
+          <span
+            className="absolute inset-[1.375rem] animate-spin-medium rounded-pill border border-transparent border-r-accent-soft/55"
+            aria-hidden="true"
+          />
+          <CyphrMark size={42} withGlow />
         </div>
-        <h3 className="text-teal-400 font-medium tracking-widest uppercase text-sm animate-pulse h-5">
-          {messages[msgIndex]}
-        </h3>
+
+        <p className="mt-comfortable text-head font-semibold tracking-[0.34em] text-ink">CYPHR</p>
+        <p className="eyebrow mt-2 tracking-[0.26em]">System initializing</p>
+
+        {/* Indeterminate progress, the same hairline idiom as document indexing */}
+        <span className="relative mt-normal h-px w-40 overflow-hidden bg-line" aria-hidden="true">
+          <span className="absolute inset-y-0 w-1/3 animate-sweep-x bg-accent" />
+        </span>
       </div>
     </div>
   );

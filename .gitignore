@@ -50,6 +50,11 @@ htmlcov/
 node_modules/
 jspm_packages/
 
+# The Python block above ignores a bare `lib/`, which matches at any depth and
+# would silently swallow the frontend's own source directory. Re-include it —
+# the app does not build without these modules.
+!frontend/src/lib/
+
 # Production builds
 dist/
 build/

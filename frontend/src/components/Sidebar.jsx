@@ -1,181 +1,522 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { MessageSquare, Trash2, LogOut, Plus, Database, Pencil } from 'lucide-react';
-import toast from 'react-hot-toast';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
+import toast from 'react-hot-toast';
+import clsx from 'clsx';
+import {
+  Check,
+  Database,
+  LogOut,
+  MessageSquare,
+  MessagesSquare,
+  PanelLeft,
+  PanelLeftClose,
+  Pencil,
+  Plus,
+  Trash2,
+  X,
+} from 'lucide-react';
+import CyphrMark from './ui/CyphrMark';
+import { groupChatsByRecency, pluralize } from '../lib/format';
+import { errorDetail } from '../lib/errors';
+import { focusablesIn } from '../lib/focus';
 
-const Sidebar = ({ sidebarOpen, user, handleLogout, chats, activeChatId, setActiveChatId, setChats, openKB }) => {
+/**
+ * Navigation rail for the workspace: identity, primary actions, and the
+ * conversation history grouped by recency.
+ *
+ * Three presentations, one component (and therefore one set of hooks — this
+ * component previously returned before `useEffect`, which broke the rules of
+ * hooks):
+ *   - desktop expanded  → 280px panel in normal flow
+ *   - desktop collapsed → 68px icon rail with tooltips
+ *   - mobile            → off-canvas drawer over the app
+ */
+const Sidebar = ({
+  isDesktop,
+  collapsed,
+  mobileOpen,
+  onCloseMobile,
+  onToggleCollapse,
+  user,
+  onLogout,
+  chats,
+  setChats,
+  activeChatId,
+  onSelectChat,
+  onOpenKnowledgeBase,
+  documentCount = 0,
+}) => {
   const [editingChatId, setEditingChatId] = useState(null);
-  const [editTitleText, setEditTitleText] = useState("");
+  const [editTitle, setEditTitle] = useState('');
+  const [pendingDeleteId, setPendingDeleteId] = useState(null);
+  const [deletingChatId, setDeletingChatId] = useState(null);
+  const [creating, setCreating] = useState(false);
   const inputRef = useRef(null);
+  const asideRef = useRef(null);
+  const closeRef = useRef(null);
+  const restoreFocusRef = useRef(null);
 
-  if (!sidebarOpen) return null;
+  const isRail = isDesktop && collapsed;
+  const isDrawer = !isDesktop;
+  const drawerOpen = isDrawer && mobileOpen;
+  const groups = useMemo(() => groupChatsByRecency(chats), [chats]);
 
   useEffect(() => {
-    if (editingChatId && inputRef.current) {
-      inputRef.current.focus();
-    }
+    if (!editingChatId) return;
+    inputRef.current?.focus();
+    inputRef.current?.select();
   }, [editingChatId]);
 
-  const handleNewChat = async () => {
+  // The drawer covers the app behind a scrim, so it takes focus while it is
+  // open and hands it back to whatever opened it on the way out.
+  useEffect(() => {
+    if (!drawerOpen) return undefined;
+    restoreFocusRef.current = document.activeElement;
+    const frame = requestAnimationFrame(() => closeRef.current?.focus({ preventScroll: true }));
+    return () => {
+      cancelAnimationFrame(frame);
+      const previous = restoreFocusRef.current;
+      restoreFocusRef.current = null;
+      if (previous && typeof previous.focus === 'function' && document.contains(previous)) {
+        previous.focus({ preventScroll: true });
+      }
+    };
+  }, [drawerOpen]);
+
+  // Tab must not wander out of the drawer into the content it is covering.
+  const handleDrawerKeyDown = useCallback(
+    (event) => {
+      if (event.key !== 'Tab' || !drawerOpen) return;
+      const items = focusablesIn(asideRef.current);
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    },
+    [drawerOpen]
+  );
+
+  // Collapsing to the rail or closing the drawer must never leave a row stuck
+  // mid-rename or mid-confirmation.
+  useEffect(() => {
+    if (isRail || (!isDesktop && !mobileOpen)) {
+      setEditingChatId(null);
+      setPendingDeleteId(null);
+    }
+  }, [isRail, isDesktop, mobileOpen]);
+
+  // A destructive confirmation should not linger indefinitely.
+  useEffect(() => {
+    if (!pendingDeleteId) return undefined;
+    const timer = setTimeout(() => setPendingDeleteId(null), 5000);
+    return () => clearTimeout(timer);
+  }, [pendingDeleteId]);
+
+  const handleNewChat = useCallback(async () => {
+    if (creating) return;
+    setCreating(true);
     try {
       const res = await axios.post('/api/chats/new');
-      setChats(prev => [res.data, ...prev]);
-      setActiveChatId(res.data.chat_id);
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "Failed to create new chat");
+      setChats((prev) => [res.data, ...prev]);
+      onSelectChat(res.data.chat_id);
+    } catch (error) {
+      toast.error(errorDetail(error, 'Could not start a new conversation.'));
+    } finally {
+      setCreating(false);
     }
-  };
+  }, [creating, onSelectChat, setChats]);
 
-  const handleDeleteChat = async (e, chatId) => {
-    e.stopPropagation();
-    try {
-      await axios.delete(`/api/chats/${chatId}`);
-      setChats(prev => prev.filter(c => c.chat_id !== chatId));
-      if (activeChatId === chatId) setActiveChatId(null);
-      toast.success("Chat removed");
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "Failed to delete chat");
-    }
-  };
+  const handleDelete = useCallback(
+    async (chatId) => {
+      setPendingDeleteId(null);
+      setDeletingChatId(chatId);
+      try {
+        await axios.delete(`/api/chats/${chatId}`);
+        setChats((prev) => prev.filter((chat) => chat.chat_id !== chatId));
+        if (activeChatId === chatId) onSelectChat(null);
+        toast.success('Conversation deleted');
+      } catch (error) {
+        toast.error(errorDetail(error, 'Could not delete that conversation.'));
+      } finally {
+        setDeletingChatId(null);
+      }
+    },
+    [activeChatId, onSelectChat, setChats]
+  );
 
-  const startEditing = (e, chat) => {
-    e.stopPropagation();
+  const saveTitle = useCallback(
+    async (chatId) => {
+      const title = editTitle.trim();
+      setEditingChatId(null);
+      const current = chats.find((chat) => chat.chat_id === chatId);
+      if (!title || title === current?.title) return;
+      try {
+        await axios.patch(`/api/chats/${chatId}/title`, { title });
+        setChats((prev) => prev.map((chat) => (chat.chat_id === chatId ? { ...chat, title } : chat)));
+      } catch (error) {
+        toast.error(errorDetail(error, 'Could not rename that conversation.'));
+      }
+    },
+    [chats, editTitle, setChats]
+  );
+
+  const startEditing = (chat) => {
+    setPendingDeleteId(null);
+    setEditTitle(chat.title ?? '');
     setEditingChatId(chat.chat_id);
-    setEditTitleText(chat.title);
   };
 
-  const saveTitle = async (chatId) => {
-    if (!editTitleText.trim()) {
-      setEditingChatId(null);
-      return;
-    }
-    try {
-      await axios.patch(`/api/chats/${chatId}/title`, { title: editTitleText });
-      setChats(prev => prev.map(c => c.chat_id === chatId ? { ...c, title: editTitleText } : c));
-      toast.success("Title updated");
-    } catch (err) {
-      toast.error(err.response?.data?.detail || "Failed to update title");
-    }
-    setEditingChatId(null);
+  const initial = (user?.fullname || user?.email || '?').trim().charAt(0).toUpperCase() || '?';
+
+  const renderChatRow = (chat) => {
+    const isActive = chat.chat_id === activeChatId;
+    const isEditing = editingChatId === chat.chat_id;
+    const isConfirming = pendingDeleteId === chat.chat_id;
+    const title = chat.title || 'Untitled';
+
+    return (
+      <li key={chat.chat_id}>
+        <div
+          className={clsx(
+            'group relative flex items-center gap-1 rounded-md pl-2.5 pr-1.5 transition-colors duration-fast ease-standard',
+            isActive ? 'active-rule bg-surface-3 text-ink' : 'text-ink-dim hover:bg-surface-2 hover:text-ink',
+            isConfirming && 'bg-danger/10'
+          )}
+        >
+          {isEditing ? (
+            <input
+              ref={inputRef}
+              value={editTitle}
+              aria-label="Conversation title"
+              onChange={(event) => setEditTitle(event.target.value)}
+              onBlur={() => saveTitle(chat.chat_id)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  saveTitle(chat.chat_id);
+                } else if (event.key === 'Escape') {
+                  event.preventDefault();
+                  setEditingChatId(null);
+                }
+              }}
+              className="field my-1 h-8 w-full py-0 text-cap"
+            />
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => onSelectChat(chat.chat_id)}
+                aria-current={isActive ? 'true' : undefined}
+                className="flex min-w-0 flex-1 items-center gap-2.5 rounded-sm py-2 text-left"
+              >
+                <MessageSquare
+                  className={clsx(
+                    'h-3.5 w-3.5 shrink-0 transition-colors duration-fast',
+                    isActive ? 'text-accent' : 'text-ink-faint group-hover:text-accent'
+                  )}
+                />
+                <span className="truncate text-cap font-medium">{title}</span>
+              </button>
+
+              {isConfirming ? (
+                <span className="flex shrink-0 items-center gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(chat.chat_id)}
+                    className="icon-btn icon-btn-danger h-7 w-7"
+                    aria-label={`Confirm deleting ${title}`}
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingDeleteId(null)}
+                    className="icon-btn h-7 w-7"
+                    aria-label="Keep conversation"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </span>
+              ) : (
+                <span
+                  className={clsx(
+                    'flex shrink-0 items-center gap-0.5 transition-opacity duration-fast',
+                    // Hover cannot reveal anything on a touch screen, so where
+                    // there is no hover the row's actions are simply always on.
+                    'opacity-0 focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100',
+                    isActive && 'opacity-70'
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => startEditing(chat)}
+                    className="icon-btn h-7 w-7"
+                    aria-label={`Rename ${title}`}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingDeleteId(chat.chat_id)}
+                    disabled={deletingChatId === chat.chat_id}
+                    className="icon-btn icon-btn-danger h-7 w-7"
+                    aria-label={`Delete ${title}`}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </span>
+              )}
+            </>
+          )}
+        </div>
+      </li>
+    );
   };
 
-  const handleKeyDown = (e, chatId) => {
-    if (e.key === 'Enter') {
-      saveTitle(chatId);
-    } else if (e.key === 'Escape') {
-      setEditingChatId(null);
-    }
-  };
+  const shell = clsx(
+    'relative z-drawer flex h-full shrink-0 flex-col border-r border-line bg-surface-1/80 backdrop-blur-xl',
+    isDesktop
+      ? ['transition-[width] duration-emphasized ease-standard', isRail ? 'w-rail' : 'w-sidebar']
+      : [
+          'fixed inset-y-0 left-0 w-sidebar max-w-[85vw] shadow-panel',
+          'transition-[transform,visibility] duration-emphasized ease-exit',
+          mobileOpen ? 'visible translate-x-0' : 'invisible -translate-x-full',
+        ]
+  );
 
   return (
-    <div className="w-64 bg-[#bce6ee]/60 backdrop-blur-xl border-r border-cyan-300/40 flex flex-col h-full flex-shrink-0 text-[#0e3b43]">
-      {/* Header */}
-      <div className="p-4 flex items-center mb-2">
-        <div className="w-8 h-8 bg-gradient-to-r from-cyan-500 to-teal-500 rounded-lg flex items-center justify-center font-bold text-white shadow-lg shadow-cyan-500/25 mr-3">
-          CY
-        </div>
-        <h1 className="text-xl font-bold text-[#0e3b43] tracking-tight">CYPHR</h1>
-      </div>
-      
-      {/* Top Actions Header */}
-      <div className="px-4 mb-4 space-y-2">
-        <button 
-          onClick={handleNewChat}
-          className="w-full flex items-center justify-center space-x-2 py-2.5 bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-400 hover:to-teal-400 text-white font-bold rounded-xl shadow-lg shadow-cyan-500/25 transition-all duration-300 active:scale-[0.98]"
-        >
-          <Plus className="w-4 h-4" />
-          <span>New Chat</span>
-        </button>
-        <button 
-          onClick={openKB}
-          className="w-full flex items-center justify-center space-x-2 py-2.5 bg-[#ffffff]/60 hover:bg-[#ffffff]/90 text-[#0e3b43] border border-cyan-300/50 rounded-xl transition-all duration-300 active:scale-[0.98] shadow-sm"
-        >
-          <Database className="w-4 h-4 text-cyan-600" />
-          <span>Knowledge Base</span>
-        </button>
-      </div>
+    <>
+      {!isDesktop && (
+        <button
+          type="button"
+          aria-label="Close navigation"
+          tabIndex={mobileOpen ? 0 : -1}
+          onClick={onCloseMobile}
+          className={clsx(
+            'fixed inset-0 z-chrome cursor-default bg-surface-0/70 backdrop-blur-xs transition-opacity duration-normal ease-standard',
+            mobileOpen ? 'opacity-100' : 'pointer-events-none opacity-0'
+          )}
+        />
+      )}
 
-      {/* Recent Chats */}
-      <div className="flex-1 overflow-y-auto px-4 space-y-1 custom-scrollbar">
-        <h2 className="text-xs font-bold text-teal-800/70 uppercase tracking-wider mb-3 px-1 mt-2">Recent Chats</h2>
-        {chats.length === 0 ? (
-          <p className="text-sm text-teal-800/70 py-2 px-1">No chats yet.</p>
-        ) : (
-          chats.map((chat) => {
-            const isActive = chat.chat_id === activeChatId;
-            const isEditing = editingChatId === chat.chat_id;
-            
-            return (
-              <div 
-                key={chat.chat_id}
-                onClick={() => { if (!isEditing) setActiveChatId(chat.chat_id); }}
-                className={`flex items-center px-3 py-2.5 rounded-xl cursor-pointer group transition-all duration-200 justify-between
-                  ${isActive 
-                    ? 'bg-[#ffffff]/80 border border-cyan-300/50 text-[#0e3b43] shadow-sm shadow-cyan-500/10' 
-                    : 'text-teal-800/70 hover:bg-[#ffffff]/50 hover:text-[#0e3b43] border border-transparent'
-                  }`}
+      <aside
+        ref={asideRef}
+        className={shell}
+        aria-label="Workspace navigation"
+        onKeyDown={isDrawer ? handleDrawerKeyDown : undefined}
+      >
+
+        {/* Identity */}
+        <div
+          className={clsx(
+            'flex h-14 shrink-0 items-center gap-2.5 border-b border-line-subtle',
+            isRail ? 'justify-center px-0' : 'px-3'
+          )}
+        >
+          <CyphrMark size={isRail ? 28 : 26} withGlow />
+          {!isRail && (
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sub font-semibold tracking-tight text-ink">CYPHR</p>
+              <p className="eyebrow truncate">Knowledge Workspace</p>
+            </div>
+          )}
+          {isDesktop
+            ? !isRail && (
+                <button
+                  type="button"
+                  onClick={onToggleCollapse}
+                  className="icon-btn tip shrink-0"
+                  data-tip="Collapse"
+                  aria-label="Collapse sidebar"
+                >
+                  <PanelLeftClose className="h-4 w-4" />
+                </button>
+              )
+            : (
+                <button
+                  ref={closeRef}
+                  type="button"
+                  onClick={onCloseMobile}
+                  className="icon-btn shrink-0"
+                  aria-label="Close navigation"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+        </div>
+
+        {/* Primary actions */}
+        <div className={clsx('shrink-0', isRail ? 'space-y-1.5 px-2 py-3' : 'space-y-2 px-3 py-3')}>
+          {isRail ? (
+            <>
+              <button
+                type="button"
+                onClick={handleNewChat}
+                disabled={creating}
+                className="icon-btn icon-btn-primary tip mx-auto"
+                data-tip="New chat"
+                aria-label="New chat"
               >
-                <div className="flex items-center overflow-hidden flex-1 mr-2">
-                  <MessageSquare className={`w-4 h-4 mr-3 flex-shrink-0 ${isActive ? 'text-cyan-600' : 'opacity-70 group-hover:opacity-100 group-hover:text-cyan-600'}`} />
-                  
-                  {isEditing ? (
-                    <input 
-                      ref={inputRef}
-                      type="text"
-                      value={editTitleText}
-                      onChange={(e) => setEditTitleText(e.target.value)}
-                      onBlur={() => saveTitle(chat.chat_id)}
-                      onKeyDown={(e) => handleKeyDown(e, chat.chat_id)}
-                      onClick={(e) => e.stopPropagation()}
-                      className="bg-transparent border-b border-cyan-500 text-cyan-900 outline-none px-1 text-sm w-full"
-                    />
-                  ) : (
-                    <span className="truncate text-sm font-medium">{chat.title}</span>
-                  )}
-                </div>
-                
-                {!isEditing && (
-                  <div className="opacity-0 group-hover:opacity-100 flex items-center space-x-1 flex-shrink-0">
-                    <button 
-                      className="p-1 text-teal-800/70 hover:text-cyan-600 transition-all"
-                      title="Rename chat"
-                      onClick={(e) => startEditing(e, chat)}
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                    <button 
-                      className="p-1 text-teal-800/70 hover:text-red-500 transition-all"
-                      title="Delete chat"
-                      onClick={(e) => handleDeleteChat(e, chat.chat_id)}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                )}
-              </div>
-            )
-          })
-        )}
-      </div>
-
-      {/* User Profile */}
-      <div className="p-4 border-t border-cyan-300/40 bg-[#cbf0f8]/50 mt-auto">
-        <div className="flex items-center justify-between p-2 rounded-xl hover:bg-[#ffffff]/60 transition-colors cursor-pointer group">
-          <div className="flex items-center space-x-3 overflow-hidden">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-r from-cyan-500 to-teal-500 flex items-center justify-center text-sm font-bold text-white flex-shrink-0 shadow-md">
-              {user.fullname.charAt(0).toUpperCase()}
-            </div>
-            <div className="truncate">
-              <p className="text-sm font-bold text-[#0e3b43] truncate">{user.fullname}</p>
-              <p className="text-xs text-teal-800/70 truncate">{user.email}</p>
-            </div>
-          </div>
-          <button onClick={handleLogout} className="p-1.5 text-teal-800/70 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-colors" title="Log out">
-            <LogOut className="w-4 h-4" />
-          </button>
+                <Plus className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={onOpenKnowledgeBase}
+                className="icon-btn tip mx-auto"
+                data-tip={`Knowledge base · ${pluralize(documentCount, 'document')}`}
+                aria-label="Open knowledge base"
+              >
+                <Database className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={onToggleCollapse}
+                className="icon-btn tip mx-auto"
+                data-tip="Expand"
+                aria-label="Expand sidebar"
+              >
+                <PanelLeft className="h-4 w-4" />
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" onClick={handleNewChat} disabled={creating} className="btn btn-primary w-full">
+                <Plus className="h-4 w-4" />
+                New chat
+              </button>
+              <button
+                type="button"
+                onClick={onOpenKnowledgeBase}
+                className="btn btn-secondary w-full justify-between"
+              >
+                <span className="flex items-center gap-2">
+                  <Database className="h-4 w-4 text-accent" />
+                  Knowledge base
+                </span>
+                <span className="chip chip-accent tabular">{documentCount}</span>
+              </button>
+            </>
+          )}
         </div>
-      </div>
-    </div>
+
+        {/* Conversations */}
+        <nav className="scroll-thin min-h-0 flex-1 overflow-y-auto pb-2" aria-label="Conversations">
+          {isRail ? (
+            chats.length === 0 ? (
+              <div
+                className="mx-auto grid h-9 w-9 place-items-center rounded-md border border-dashed border-line text-ink-faint"
+                title="No conversations yet"
+              >
+                <MessagesSquare className="h-4 w-4" aria-hidden="true" />
+                <span className="sr-only">No conversations yet</span>
+              </div>
+            ) : (
+              <ul className="space-y-1 px-2">
+                {chats.map((chat) => {
+                  const isActive = chat.chat_id === activeChatId;
+                  // This list scrolls, and a scroll container clips both axes —
+                  // so the rail's rows use the native tooltip, which no
+                  // ancestor overflow can cut off.
+                  return (
+                    <li key={chat.chat_id}>
+                      <button
+                        type="button"
+                        onClick={() => onSelectChat(chat.chat_id)}
+                        className={clsx(
+                          'icon-btn mx-auto',
+                          isActive && 'bg-surface-3 text-accent ring-1 ring-line-strong'
+                        )}
+                        title={chat.title || 'Untitled'}
+                        aria-current={isActive ? 'true' : undefined}
+                        aria-label={chat.title || 'Untitled conversation'}
+                      >
+                        <MessageSquare className="h-4 w-4" />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )
+          ) : chats.length === 0 ? (
+            <div className="mx-3 rounded-lg border border-dashed border-line bg-surface-2/40 px-3 py-7 text-center">
+              <MessagesSquare className="mx-auto mb-2 h-5 w-5 text-ink-faint" />
+              <p className="text-cap font-medium text-ink-dim">No conversations yet</p>
+              <p className="mt-1 text-label leading-relaxed text-ink-faint">
+                Ask a question to start your first thread.
+              </p>
+            </div>
+          ) : (
+            groups.map((group) => (
+              <section key={group.id} className="pb-1">
+                <h3 className="eyebrow sticky top-0 z-10 bg-surface-1/95 px-3.5 py-1.5 backdrop-blur-sm">
+                  {group.label}
+                </h3>
+                <ul className="space-y-px px-2">
+                  {group.chats.map((chat) => renderChatRow(chat))}
+                </ul>
+              </section>
+            ))
+          )}
+        </nav>
+
+        {/* Account */}
+        <div
+          className={clsx(
+            'shrink-0 border-t border-line-subtle bg-surface-2/40',
+            isRail ? 'px-2 py-2.5' : 'p-2'
+          )}
+        >
+          {isRail ? (
+            <div className="flex flex-col items-center gap-1.5">
+              <span
+                className="tip grid h-8 w-8 place-items-center rounded-full text-cap font-bold text-ink-inverse"
+                style={{ backgroundImage: 'linear-gradient(135deg, rgb(var(--c-accent-soft)), rgb(var(--c-azure)))' }}
+                data-tip={user?.email || 'Signed in'}
+              >
+                {initial}
+              </span>
+              <button
+                type="button"
+                onClick={onLogout}
+                className="icon-btn icon-btn-danger tip"
+                data-tip="Log out"
+                aria-label="Log out"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 transition-colors duration-fast hover:bg-surface-3/60">
+              <span
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-cap font-bold text-ink-inverse"
+                style={{ backgroundImage: 'linear-gradient(135deg, rgb(var(--c-accent-soft)), rgb(var(--c-azure)))' }}
+              >
+                {initial}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-cap font-semibold text-ink">{user?.fullname || 'Signed in'}</p>
+                <p className="truncate text-label text-ink-faint">{user?.email}</p>
+              </div>
+              <button
+                type="button"
+                onClick={onLogout}
+                className="icon-btn icon-btn-danger tip shrink-0"
+                data-tip="Log out"
+                aria-label="Log out"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+        </div>
+      </aside>
+    </>
   );
 };
 

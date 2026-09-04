@@ -1,102 +1,161 @@
-import React, { useState, useRef } from 'react';
-import { UploadCloud, File, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
-import axios from 'axios';
-import toast from 'react-hot-toast';
+import React, { useCallback, useRef, useState } from 'react';
+import { AlertTriangle, CheckCircle2, Loader2, UploadCloud, X } from 'lucide-react';
+import clsx from 'clsx';
+import useDocumentUpload, {
+  ACCEPTED_EXTENSION,
+  UPLOAD_LIMIT_LABEL,
+} from '../hooks/useDocumentUpload';
+import { formatBytes, splitFilename } from '../lib/format';
 
-const FileUpload = ({ onUploadSuccess }) => {
-  const [file, setFile] = useState(null);
-  const [status, setStatus] = useState('idle'); // idle, uploading, success, error
-  const fileInputRef = useRef(null);
+/**
+ * The knowledge-base dropzone.
+ *
+ * All upload state lives in `useDocumentUpload` — the same hook the composer's
+ * attach control uses — so there is one upload implementation in the app and
+ * both entry points behave identically.
+ */
+const FileUpload = ({ onUploaded }) => {
+  const inputRef = useRef(null);
+  const dragDepth = useRef(0);
+  const [dragging, setDragging] = useState(false);
+  const upload = useDocumentUpload({ onUploaded });
 
-  const handleFileChange = (e) => {
-    if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0]);
-      setStatus('idle');
-    }
+  const handleFiles = useCallback(
+    (files) => {
+      const file = files?.[0];
+      if (file) upload.upload(file);
+    },
+    [upload]
+  );
+
+  const onDragEnter = (event) => {
+    if (!event.dataTransfer?.types?.includes('Files')) return;
+    dragDepth.current += 1;
+    setDragging(true);
   };
 
-  const handleUpload = async () => {
-    if (!file) return;
-
-    setStatus('uploading');
-    const formData = new FormData();
-    formData.append('file', file);
-
-    const toastId = toast.loading('Uploading and processing document...');
-
-    try {
-      const response = await axios.post('/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      setStatus('success');
-      toast.success(response.data.message || 'Document ready!', { id: toastId });
-      if (onUploadSuccess) onUploadSuccess(file.name);
-      setTimeout(() => {
-        setFile(null);
-        setStatus('idle');
-        if (fileInputRef.current) fileInputRef.current.value = '';
-      }, 2000);
-    } catch (error) {
-      setStatus('error');
-      toast.error(error.response?.data?.detail || 'Upload failed.', { id: toastId });
-    }
+  const onDragLeave = () => {
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDragging(false);
   };
 
-  return (
-    <div className="flex flex-col space-y-3">
-      {!file ? (
-        <button 
-          onClick={() => fileInputRef.current?.click()}
-          className="w-full flex items-center justify-center space-x-2 py-4 px-4 rounded-xl border-2 border-dashed border-cyan-300 bg-[#ffffff]/60 hover:bg-[#ffffff]/90 hover:border-cyan-400 text-teal-800/70 hover:text-[#0e3b43] transition-all duration-300 text-sm font-bold shadow-sm"
-        >
-          <UploadCloud className="w-5 h-5" />
-          <span>Click to upload PDF</span>
-        </button>
-      ) : (
-        <div className="flex flex-col space-y-2 p-3 bg-[#ffffff]/80 rounded-xl border border-cyan-300/60 shadow-sm">
-          <div className="flex items-center space-x-3 overflow-hidden">
-            <File className="w-4 h-4 text-cyan-600 flex-shrink-0" />
-            <span className="text-xs font-bold text-[#0e3b43] truncate">{file.name}</span>
+  const onDrop = (event) => {
+    event.preventDefault();
+    dragDepth.current = 0;
+    setDragging(false);
+    handleFiles(event.dataTransfer?.files);
+  };
+
+  const { status, progress, file, error } = upload;
+  const busy = status === 'uploading' || status === 'indexing';
+  const name = splitFilename(file?.name ?? '');
+
+  if (status !== 'idle') {
+    return (
+      <div
+        className={clsx(
+          'panel-flat relative overflow-hidden p-3',
+          status === 'error' && 'border-danger/40',
+          status === 'success' && 'border-success/40'
+        )}
+        role="status"
+      >
+        {busy && (
+          <div className="absolute inset-x-0 top-0 h-0.5 bg-surface-4" aria-hidden="true">
+            {status === 'uploading' ? (
+              <div
+                className="h-full bg-accent transition-[width] duration-normal ease-standard"
+                style={{ width: `${progress}%` }}
+              />
+            ) : (
+              <div className="h-full w-1/3 animate-sweep-x bg-accent" />
+            )}
           </div>
-          
-          {status === 'idle' && (
-            <div className="flex space-x-2 mt-2">
-              <button onClick={() => setFile(null)} className="flex-1 py-1.5 text-xs font-bold text-teal-800/70 hover:text-[#0e3b43] hover:bg-[#ffffff] rounded-lg transition-colors border border-transparent hover:border-cyan-300/50 shadow-sm">Cancel</button>
-              <button onClick={handleUpload} className="flex-1 py-1.5 text-xs bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-400 hover:to-teal-400 text-white font-bold rounded-lg shadow-md shadow-cyan-500/20 transition-all">Upload</button>
-            </div>
-          )}
+        )}
 
-          {status === 'uploading' && (
-            <div className="flex items-center space-x-2 text-cyan-600 font-bold py-1.5">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              <span className="text-xs">Processing...</span>
-            </div>
-          )}
+        <div className="flex items-center gap-3">
+          <span
+            className={clsx(
+              'grid h-9 w-9 shrink-0 place-items-center rounded-md border',
+              status === 'error' && 'border-danger/30 bg-danger/10 text-danger',
+              status === 'success' && 'border-success/30 bg-success/10 text-success',
+              busy && 'border-accent/30 bg-accent/10 text-accent'
+            )}
+          >
+            {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+            {status === 'success' && <CheckCircle2 className="h-4 w-4" aria-hidden="true" />}
+            {status === 'error' && <AlertTriangle className="h-4 w-4" aria-hidden="true" />}
+          </span>
 
-          {status === 'success' && (
-            <div className="flex items-center space-x-2 text-emerald-600 font-bold py-1.5">
-              <CheckCircle2 className="w-4 h-4" />
-              <span className="text-xs">Done</span>
-            </div>
-          )}
+          <div className="min-w-0 flex-1">
+            <p className="flex min-w-0 items-baseline text-sub font-medium text-ink">
+              <span className="truncate">{name.stem || 'Selected file'}</span>
+              {name.ext && <span className="shrink-0 text-ink-faint">{name.ext}</span>}
+            </p>
+            <p className={clsx('mt-0.5 text-cap', status === 'error' ? 'text-danger' : 'text-ink-dim')}>
+              {status === 'uploading' && `Uploading · ${progress}%${file ? ` of ${formatBytes(file.size)}` : ''}`}
+              {status === 'indexing' && 'Extracting text and building embeddings…'}
+              {status === 'success' && 'Indexed — answers can cite this document now'}
+              {status === 'error' && error}
+            </p>
+          </div>
 
+          {busy && (
+            <button type="button" onClick={upload.cancel} className="icon-btn h-8 w-8 shrink-0" aria-label="Cancel upload">
+              <X className="h-4 w-4" />
+            </button>
+          )}
           {status === 'error' && (
-            <div className="flex items-center space-x-2 text-red-500 font-bold py-1.5">
-              <AlertCircle className="w-4 h-4" />
-              <span className="text-xs">Failed</span>
-            </div>
+            <button type="button" onClick={upload.reset} className="btn btn-secondary btn-sm shrink-0">
+              Try another
+            </button>
           )}
         </div>
-      )}
-      
-      <input 
-        type="file" 
-        accept=".pdf" 
-        className="hidden" 
-        ref={fileInputRef}
-        onChange={handleFileChange}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        accept={`application/pdf,${ACCEPTED_EXTENSION}`}
+        className="hidden"
+        onChange={(event) => {
+          handleFiles(event.target.files);
+          event.target.value = '';
+        }}
       />
-    </div>
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        onDragEnter={onDragEnter}
+        onDragOver={(event) => event.preventDefault()}
+        onDragLeave={onDragLeave}
+        onDrop={onDrop}
+        className={clsx(
+          'flex w-full flex-col items-center gap-1 rounded-lg border border-dashed px-4 py-6 text-center',
+          'transition-all duration-fast ease-standard',
+          dragging
+            ? 'border-accent/70 bg-accent/10 shadow-glow-sm'
+            : 'border-line-strong bg-surface-2/40 hover:border-accent/45 hover:bg-surface-2/70'
+        )}
+      >
+        <span
+          className={clsx(
+            'mb-1 grid h-10 w-10 place-items-center rounded-md border text-accent transition-colors duration-fast',
+            dragging ? 'border-accent/50 bg-accent/15' : 'border-line bg-surface-3/70'
+          )}
+        >
+          <UploadCloud className="h-5 w-5" aria-hidden="true" />
+        </span>
+        <span className="text-sub font-medium text-ink">
+          {dragging ? 'Drop to index this PDF' : 'Drop a PDF here, or click to browse'}
+        </span>
+        <span className="text-cap text-ink-faint">{UPLOAD_LIMIT_LABEL}</span>
+      </button>
+    </>
   );
 };
 

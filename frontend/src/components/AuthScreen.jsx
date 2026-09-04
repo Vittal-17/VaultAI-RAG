@@ -1,187 +1,381 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import axios from 'axios';
-import { Loader, Mail, Lock, User, Eye, EyeOff } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { GoogleLogin } from '@react-oauth/google';
+import {
+  AlertTriangle,
+  Eye,
+  EyeOff,
+  FileText,
+  Loader2,
+  Quote,
+  ShieldCheck,
+  SlidersHorizontal,
+} from 'lucide-react';
+import clsx from 'clsx';
 import AuthLoadingOverlay from './AuthLoadingOverlay';
+import Atmosphere from './ui/Atmosphere';
+import CyphrMark from './ui/CyphrMark';
 import { withAuthDelay } from '../utils/authDelay';
+import { errorDetail } from '../lib/errors';
 
+const EMPTY_FORM = { fullname: '', email: '', password: '', confirmPassword: '' };
+
+/** Deliberately permissive — it only catches a plainly incomplete address. */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** What the product does today. Nothing here promises unbuilt behaviour. */
+const CAPABILITIES = [
+  {
+    icon: FileText,
+    title: 'Your own documents',
+    body: 'Add PDFs to a private knowledge base and question them in plain language.',
+  },
+  {
+    icon: Quote,
+    title: 'Answers with sources',
+    body: 'Every response lists the files and pages the answer was drawn from.',
+  },
+  {
+    icon: SlidersHorizontal,
+    title: 'Your choice of model',
+    body: 'Move between the configured providers and models whenever you like.',
+  },
+];
+
+/**
+ * Sign-in and registration, built from the same tokens and primitives as the
+ * workspace so authentication reads as part of the product rather than a gate
+ * in front of it.
+ *
+ * Validation mirrors only what the server actually enforces: a well-formed
+ * address and fields that are present. The API sets no password length or
+ * complexity rules, so this screen invents none — the single extra check is the
+ * register-time confirmation, which exists purely to catch typing mistakes.
+ */
 const AuthScreen = ({ onAuthSuccess }) => {
   const [isLogin, setIsLogin] = useState(true);
-  const [formData, setFormData] = useState({ fullname: '', email: '', password: '', confirmPassword: '' });
-  const [loading, setLoading] = useState(false);
+  const [form, setForm] = useState(EMPTY_FORM);
   const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-  };
+  const mountedRef = useRef(true);
+  const errorId = useId();
 
-  const handleGoogleSuccess = async (credentialResponse) => {
-    try {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const handleChange = useCallback((event) => {
+    const { name, value } = event.target;
+    setForm((prev) => ({ ...prev, [name]: value }));
+    setError(null);
+  }, []);
+
+  // Switching intent clears the secrets: the two modes want different
+  // autocomplete values, and a manager-filled password should not silently
+  // become a new account's password.
+  const switchMode = useCallback((login) => {
+    setIsLogin(login);
+    setError(null);
+    setShowPassword(false);
+    setForm((prev) => ({ ...prev, password: '', confirmPassword: '' }));
+  }, []);
+
+  const authenticate = useCallback(
+    async (request, success, fallback) => {
       setLoading(true);
-      const res = await withAuthDelay(() => axios.post('/api/auth/google', {
-        credential: credentialResponse.credential,
-      }));
-      toast.success("Google login successful!");
-      onAuthSuccess(res.data.user);
-    } catch (err) {
-      toast.error('Google login failed');
-      setLoading(false);
-    }
-  };
+      setError(null);
+      try {
+        const res = await withAuthDelay(request);
+        toast.success(success);
+        // App swaps this screen for the workspace, so no state is reset here.
+        onAuthSuccess?.(res.data?.user);
+      } catch (err) {
+        if (!mountedRef.current) return;
+        setError(errorDetail(err, fallback));
+        setLoading(false);
+      }
+    },
+    [onAuthSuccess]
+  );
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!isLogin && formData.password !== formData.confirmPassword) {
-      toast.error("Passwords do not match");
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    if (loading) return;
+
+    const fullname = form.fullname.trim();
+    const email = form.email.trim();
+
+    if (!isLogin && !fullname) {
+      setError('Enter the name you would like to be called by.');
+      return;
+    }
+    if (!EMAIL_RE.test(email)) {
+      setError('That email address does not look complete.');
+      return;
+    }
+    if (!form.password) {
+      setError('Enter your password.');
+      return;
+    }
+    if (!isLogin && form.password !== form.confirmPassword) {
+      setError('Those two passwords do not match.');
       return;
     }
 
-    setLoading(true);
-    try {
-      const endpoint = isLogin ? '/api/login' : '/api/register';
-      const payload = isLogin 
-        ? { email: formData.email, password: formData.password }
-        : { fullname: formData.fullname, email: formData.email, password: formData.password };
-      
-      const res = await withAuthDelay(() => axios.post(endpoint, payload));
-      toast.success(isLogin ? "Welcome back!" : "Account created successfully!");
-      onAuthSuccess(res.data.user);
-    } catch (err) {
-      toast.error(err.response?.data?.detail || 'An error occurred. Please try again.');
-      setLoading(false);
+    authenticate(
+      () =>
+        axios.post(
+          isLogin ? '/api/login' : '/api/register',
+          isLogin ? { email, password: form.password } : { fullname, email, password: form.password }
+        ),
+      isLogin ? 'Welcome back' : 'Account created',
+      isLogin ? 'Those credentials were not accepted.' : 'That account could not be created.'
+    );
+  };
+
+  const handleGoogle = (credentialResponse) => {
+    const credential = credentialResponse?.credential;
+    if (!credential) {
+      setError('Google did not return a usable sign-in token.');
+      return;
     }
+    authenticate(
+      () => axios.post('/api/auth/google', { credential }),
+      'Signed in with Google',
+      'Google sign-in was not accepted.'
+    );
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden bg-gradient-to-br from-[#d4f0f0] via-[#e0f6f8] to-[#cbf0f8]">
+    <>
+      <Atmosphere />
       <AuthLoadingOverlay isVisible={loading} />
-      
-      {/* Decorative background elements */}
-      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full bg-cyan-200/40 blur-3xl mix-blend-multiply"></div>
-      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-teal-200/40 blur-3xl mix-blend-multiply"></div>
 
-      <div className="bg-[#ffffff]/70 backdrop-blur-xl border border-cyan-300/60 shadow-xl shadow-cyan-950/5 rounded-3xl p-8 max-w-md w-full relative z-10 transition-all duration-300">
-        
-        <div className="text-center mb-10">
-          <div className="flex justify-center items-center mb-4 relative">
-            <div className="absolute w-12 h-12 bg-cyan-400 rounded-xl blur-xl opacity-40 animate-pulse" />
-            <div className="w-12 h-12 bg-gradient-to-r from-cyan-500 to-teal-500 text-white rounded-xl flex items-center justify-center font-bold text-xl shadow-lg relative z-10 shadow-cyan-500/20">
-              CY
+      <div className="scroll-thin relative z-content h-full w-full overflow-y-auto">
+        <div className="grid min-h-full place-items-center px-4 py-large sm:px-6">
+          <div className="grid w-full max-w-5xl items-center gap-large lg:grid-cols-[minmax(0,1fr)_25rem] lg:gap-section">
+            {/* Below lg the card carries the identity on its own. */}
+            <section className="hidden lg:block">
+              <div className="flex items-center gap-3">
+                <CyphrMark size={34} withGlow />
+                <span className="text-head font-semibold tracking-[0.16em] text-ink">CYPHR</span>
+              </div>
+
+              <h1 className="mt-comfortable max-w-md text-display font-semibold leading-tight text-ink">
+                Answers you can trace back to the page.
+              </h1>
+              <p className="mt-normal max-w-md text-body leading-relaxed text-ink-dim">
+                CYPHR indexes the documents you give it, retrieves the passages that matter, and shows its
+                working — so every answer can be checked against its source.
+              </p>
+
+              <ul className="mt-large max-w-md space-y-normal">
+                {CAPABILITIES.map(({ icon: Icon, title, body }) => (
+                  <li key={title} className="flex gap-3">
+                    <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-md border border-line bg-surface-2/70 text-accent">
+                      <Icon className="h-4 w-4" aria-hidden="true" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sub font-medium text-ink">{title}</p>
+                      <p className="mt-0.5 text-cap leading-relaxed text-ink-dim">{body}</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+
+              <p className="mt-large flex items-center gap-2 text-cap text-ink-faint">
+                <ShieldCheck className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                Documents and conversations stay scoped to your account.
+              </p>
+            </section>
+
+            <div className="panel hairline relative mx-auto w-full max-w-md overflow-hidden p-comfortable sm:p-large">
+              <div className="flex items-center gap-2.5 lg:hidden">
+                <CyphrMark size={26} withGlow />
+                <span className="text-sub font-semibold tracking-[0.16em] text-ink">CYPHR</span>
+              </div>
+
+              <h2 className="mt-normal text-title font-semibold text-ink lg:mt-0">
+                {isLogin ? 'Sign in' : 'Create your account'}
+              </h2>
+              <p className="mt-1 text-cap leading-relaxed text-ink-dim">
+                {isLogin
+                  ? 'Pick up where you left off.'
+                  : 'A workspace of your own, for your own documents.'}
+              </p>
+
+              <div
+                className="mt-comfortable grid grid-cols-2 gap-1 rounded-lg border border-line-subtle bg-surface-1/70 p-1"
+                role="group"
+                aria-label="Choose sign in or register"
+              >
+                {[
+                  { label: 'Sign in', login: true },
+                  { label: 'Register', login: false },
+                ].map(({ label, login }) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => switchMode(login)}
+                    aria-pressed={isLogin === login}
+                    className={clsx(
+                      'rounded-md py-2 text-cap font-semibold transition-all duration-fast ease-standard',
+                      isLogin === login
+                        ? 'border border-accent/30 bg-accent/10 text-accent'
+                        : 'border border-transparent text-ink-dim hover:bg-surface-3/60 hover:text-ink'
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <form onSubmit={handleSubmit} className="mt-comfortable space-y-normal" noValidate>
+                {!isLogin && (
+                  <div className="animate-rise-sm">
+                    <label htmlFor="auth-fullname" className="eyebrow mb-1.5 block">
+                      Full name
+                    </label>
+                    <input
+                      id="auth-fullname"
+                      name="fullname"
+                      type="text"
+                      required
+                      autoComplete="name"
+                      value={form.fullname}
+                      onChange={handleChange}
+                      disabled={loading}
+                      placeholder="Ada Lovelace"
+                      className="field disabled:opacity-60"
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <label htmlFor="auth-email" className="eyebrow mb-1.5 block">
+                    Email
+                  </label>
+                  <input
+                    id="auth-email"
+                    name="email"
+                    type="email"
+                    required
+                    autoComplete="email"
+                    inputMode="email"
+                    value={form.email}
+                    onChange={handleChange}
+                    disabled={loading}
+                    placeholder="you@example.com"
+                    className="field disabled:opacity-60"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="auth-password" className="eyebrow mb-1.5 block">
+                    Password
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="auth-password"
+                      name="password"
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      autoComplete={isLogin ? 'current-password' : 'new-password'}
+                      value={form.password}
+                      onChange={handleChange}
+                      disabled={loading}
+                      className="field pr-11 disabled:opacity-60"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((visible) => !visible)}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      aria-pressed={showPassword}
+                      className="icon-btn absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2"
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {!isLogin && (
+                  <div className="animate-rise-sm">
+                    <label htmlFor="auth-confirm" className="eyebrow mb-1.5 block">
+                      Confirm password
+                    </label>
+                    <input
+                      id="auth-confirm"
+                      name="confirmPassword"
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      autoComplete="new-password"
+                      value={form.confirmPassword}
+                      onChange={handleChange}
+                      disabled={loading}
+                      className="field disabled:opacity-60"
+                    />
+                  </div>
+                )}
+
+                {/* Present in the DOM at all times so insertions are announced. */}
+                <div aria-live="polite" id={errorId}>
+                  {error && (
+                    <p className="flex items-start gap-2 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-cap leading-relaxed text-danger">
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      {error}
+                    </p>
+                  )}
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  aria-describedby={error ? errorId : undefined}
+                  className="btn btn-primary btn-lg w-full"
+                >
+                  {loading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+                  {loading
+                    ? isLogin
+                      ? 'Signing in'
+                      : 'Creating account'
+                    : isLogin
+                      ? 'Sign in'
+                      : 'Create account'}
+                </button>
+              </form>
+
+              <div className="mt-comfortable flex items-center gap-3">
+                <span className="divider flex-1" aria-hidden="true" />
+                <span className="eyebrow">or</span>
+                <span className="divider flex-1" aria-hidden="true" />
+              </div>
+
+              <div
+                className={clsx(
+                  'mt-comfortable flex justify-center',
+                  loading && 'pointer-events-none opacity-55'
+                )}
+              >
+                <GoogleLogin
+                  onSuccess={handleGoogle}
+                  onError={() => setError('Google sign-in could not be completed.')}
+                  theme="filled_black"
+                  size="large"
+                  shape="rectangular"
+                  text={isLogin ? 'signin_with' : 'signup_with'}
+                />
+              </div>
             </div>
           </div>
-          <h1 className="text-3xl font-bold text-[#0e3b43] mb-2 tracking-tight">CYPHR</h1>
-          <p className="text-teal-800/70 text-sm">Your intelligent knowledge workspace</p>
-        </div>
-
-        <div className="flex bg-[#a5dfec]/80 p-1 rounded-xl mb-8 border border-cyan-300/50">
-          <button
-            type="button"
-            onClick={() => { setIsLogin(true); }}
-            className={`flex-1 py-2 text-sm rounded-lg transition-all duration-300 ${isLogin ? 'bg-gradient-to-r from-cyan-500 to-teal-500 text-white font-semibold shadow-md shadow-cyan-500/20' : 'bg-transparent text-teal-900/70 hover:text-teal-950'}`}
-          >
-            Sign In
-          </button>
-          <button
-            type="button"
-            onClick={() => { setIsLogin(false); }}
-            className={`flex-1 py-2 text-sm rounded-lg transition-all duration-300 ${!isLogin ? 'bg-gradient-to-r from-cyan-500 to-teal-500 text-white font-semibold shadow-md shadow-cyan-500/20' : 'bg-transparent text-teal-900/70 hover:text-teal-950'}`}
-          >
-            Register
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {!isLogin && (
-            <div className="relative group">
-              <User className="absolute left-4 top-3.5 w-5 h-5 text-teal-800/70 group-focus-within:text-cyan-600 transition-colors" />
-              <input
-                type="text"
-                name="fullname"
-                required
-                value={formData.fullname}
-                onChange={handleChange}
-                className="w-full pl-12 pr-4 py-3 rounded-xl border border-cyan-300 bg-[#ffffff]/80 text-[#0e3b43] placeholder-teal-800/40 focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-400/30 transition-all"
-                placeholder="Full Name"
-              />
-            </div>
-          )}
-          
-          <div className="relative group">
-            <Mail className="absolute left-4 top-3.5 w-5 h-5 text-teal-800/70 group-focus-within:text-cyan-600 transition-colors" />
-            <input
-              type="email"
-              name="email"
-              required
-              value={formData.email}
-              onChange={handleChange}
-              className="w-full pl-12 pr-4 py-3 rounded-xl border border-cyan-300 bg-[#ffffff]/80 text-[#0e3b43] placeholder-teal-800/40 focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-400/30 transition-all"
-              placeholder="Email Address"
-            />
-          </div>
-
-          <div className="relative group">
-            <Lock className="absolute left-4 top-3.5 w-5 h-5 text-teal-800/70 group-focus-within:text-cyan-600 transition-colors" />
-            <input
-              type={showPassword ? 'text' : 'password'}
-              name="password"
-              required
-              value={formData.password}
-              onChange={handleChange}
-              className="w-full pl-12 pr-12 py-3 rounded-xl border border-cyan-300 bg-[#ffffff]/80 text-[#0e3b43] placeholder-teal-800/40 focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-400/30 transition-all"
-              placeholder="Password"
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-4 top-3.5 text-teal-800/70 hover:text-teal-950 transition-colors"
-            >
-              {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-            </button>
-          </div>
-
-          {!isLogin && (
-            <div className="relative group">
-              <Lock className="absolute left-4 top-3.5 w-5 h-5 text-teal-800/70 group-focus-within:text-cyan-600 transition-colors" />
-              <input
-                type={showPassword ? 'text' : 'password'}
-                name="confirmPassword"
-                required
-                value={formData.confirmPassword}
-                onChange={handleChange}
-                className="w-full pl-12 pr-12 py-3 rounded-xl border border-cyan-300 bg-[#ffffff]/80 text-[#0e3b43] placeholder-teal-800/40 focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-400/30 transition-all"
-                placeholder="Confirm Password"
-              />
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-3.5 px-4 bg-gradient-to-r from-cyan-500 to-teal-500 hover:from-cyan-400 hover:to-teal-400 text-white font-bold rounded-xl shadow-lg shadow-cyan-500/25 transition-all duration-300 disabled:opacity-70 disabled:cursor-not-allowed flex justify-center items-center active:scale-[0.98] mt-2"
-          >
-            {loading ? <Loader className="w-5 h-5 animate-spin" /> : (isLogin ? 'Sign In' : 'Create Account')}
-          </button>
-        </form>
-
-        <div className="mt-6 flex items-center justify-center">
-          <div className="border-t border-cyan-300/40 flex-grow"></div>
-          <span className="px-4 text-xs font-semibold text-teal-800/50 uppercase tracking-widest">Or continue with</span>
-          <div className="border-t border-cyan-300/40 flex-grow"></div>
-        </div>
-
-        <div className="mt-6 flex justify-center opacity-90 hover:opacity-100 transition-opacity">
-          <GoogleLogin
-            onSuccess={handleGoogleSuccess}
-            onError={() => toast.error('Google login failed')}
-            theme="outline"
-            size="large"
-            shape="rectangular"
-            text={isLogin ? 'signin_with' : 'signup_with'}
-          />
         </div>
       </div>
-    </div>
+    </>
   );
 };
 

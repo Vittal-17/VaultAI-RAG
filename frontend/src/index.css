@@ -2,22 +2,142 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ==========================================================================
+   CYPHR DESIGN TOKENS
+   Colours are stored as space-separated RGB channels so Tailwind's alpha
+   modifiers (`bg-surface-2/70`) resolve correctly through the theme mapping
+   in tailwind.config.js. Nothing in the app should hard-code a colour.
+   ========================================================================== */
+
+:root {
+  color-scheme: dark;
+
+  /* -- Structural surfaces: deep blue-black → navy, deepest first --------- */
+  --c-surface-0: 2 6 14;
+  --c-surface-1: 6 13 25;
+  --c-surface-2: 10 21 38;
+  --c-surface-3: 16 32 55;
+  --c-surface-4: 23 45 74;
+
+  /* -- Borders ----------------------------------------------------------- */
+  --c-line: 27 49 79;
+  --c-line-subtle: 17 32 53;
+  --c-line-strong: 44 78 120;
+
+  /* -- Typography -------------------------------------------------------- */
+  --c-ink: 228 240 250;
+  --c-ink-dim: 152 177 202;
+  --c-ink-faint: 104 130 158;
+  --c-ink-inverse: 3 10 20;
+
+  /* -- Identity: cyan primary → electric blue secondary ------------------ */
+  --c-accent: 34 211 238;
+  --c-accent-soft: 125 234 250;
+  --c-accent-deep: 8 145 178;
+  --c-azure: 56 130 246;
+  --c-azure-deep: 29 78 216;
+
+  /* -- Status ------------------------------------------------------------ */
+  --c-success: 45 212 191;
+  --c-warning: 246 189 96;
+  --c-danger: 248 113 113;
+
+  /* -- Type families ----------------------------------------------------- */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", "Noto Sans", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  /* -- Layout ------------------------------------------------------------ */
+  --chrome-h: 3.5rem;
+}
+
+/* ==========================================================================
+   BASE
+   ========================================================================== */
+
 @layer base {
+  * {
+    @apply border-line;
+  }
+
+  html {
+    @apply antialiased;
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html,
+  body,
+  #root {
+    @apply h-full;
+  }
+
   body {
-    @apply bg-gradient-to-br from-[#d4f0f0] via-[#e0f6f8] to-[#cbf0f8] text-[#0e3b43] min-h-screen;
+    @apply bg-surface-0 font-sans text-body text-ink;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11", "ss01";
+    text-rendering: optimizeLegibility;
+    overflow: hidden;
+  }
+
+  ::selection {
+    background-color: rgb(var(--c-accent) / 0.28);
+    color: rgb(var(--c-ink));
+  }
+
+  /* One consistent, visible focus ring across the whole product. */
+  :focus-visible {
+    outline: 2px solid rgb(var(--c-accent) / 0.85);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Mouse users never see the ring; keyboard users always do. */
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    text-wrap: balance;
+  }
+
+  input,
+  textarea,
+  select,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+
+  textarea {
+    resize: none;
+  }
+
+  /* Autofill in Chromium repaints inputs white — keep them on-brand. */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus {
+    -webkit-text-fill-color: rgb(var(--c-ink));
+    -webkit-box-shadow: 0 0 0 1000px rgb(var(--c-surface-2)) inset;
+    caret-color: rgb(var(--c-ink));
+    transition: background-color 9999s ease-out;
   }
 }
+/* ==========================================================================
+   SCROLLBARS — thin, cyan, only visible where content actually scrolls
+   ========================================================================== */
 
-@layer utilities {
-  .glass-panel {
-    @apply bg-[#ffffff]/70 backdrop-blur-xl border border-cyan-300/60 shadow-xl shadow-cyan-950/5;
-  }
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--c-line-strong)) transparent;
 }
 
-/* Custom Scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
@@ -25,36 +145,561 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(6, 182, 212, 0.4);
-  border-radius: 10px;
+  background-color: rgb(var(--c-line-strong) / 0.75);
+  border-radius: 9999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(6, 182, 212, 0.6);
+  background-color: rgb(var(--c-accent) / 0.55);
 }
 
-/* Markdown Styles */
-.markdown-body p {
-  @apply mb-4 leading-relaxed text-[#0e3b43];
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
-.markdown-body h1, .markdown-body h2, .markdown-body h3 {
-  @apply text-[#0e3b43] font-bold mb-3 mt-6;
+
+@layer utilities {
+  .scroll-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Keeps the scroll position pinned to the newest message while streaming in */
+  .scroll-anchor {
+    overflow-anchor: auto;
+    overscroll-behavior: contain;
+  }
+
+  .clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
 }
-.markdown-body ul {
-  @apply list-disc list-inside mb-4 text-[#0e3b43] space-y-2;
+/* ==========================================================================
+   ATMOSPHERE — the layered environment that sits behind every view.
+   Nothing here is interactive; every layer is pointer-events:none and
+   composited with transform/opacity only.
+   ========================================================================== */
+
+.atmosphere {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 80% at 50% -20%, rgb(var(--c-surface-2)) 0%, transparent 60%),
+    linear-gradient(180deg, rgb(var(--c-surface-1)) 0%, rgb(var(--c-surface-0)) 55%, rgb(2 5 12) 100%);
 }
-.markdown-body ol {
-  @apply list-decimal list-inside mb-4 text-[#0e3b43] space-y-2;
+
+.atmosphere > * {
+  position: absolute;
+  will-change: transform, opacity;
 }
-.markdown-body code:not(pre code) {
-  @apply bg-[#b8e6ee]/50 text-[#0e3b43] px-1.5 py-0.5 rounded-md text-sm border border-cyan-300/40;
+
+/* Primary cyan light source, upper left */
+.atmo-cyan {
+  top: -22vh;
+  left: -14vw;
+  width: 68vw;
+  height: 68vh;
+  background: radial-gradient(
+    closest-side,
+    rgb(var(--c-accent) / 0.16) 0%,
+    rgb(var(--c-accent) / 0.07) 42%,
+    transparent 72%
+  );
+  animation: drift-a 34s ease-in-out infinite;
 }
-.markdown-body pre {
-  @apply bg-[#b8e6ee]/40 border border-cyan-300/60 rounded-xl p-4 overflow-x-auto mb-4;
+
+/* Secondary electric-blue light source, lower right */
+.atmo-azure {
+  right: -18vw;
+  bottom: -26vh;
+  width: 74vw;
+  height: 72vh;
+  background: radial-gradient(
+    closest-side,
+    rgb(var(--c-azure) / 0.15) 0%,
+    rgb(var(--c-azure-deep) / 0.09) 45%,
+    transparent 74%
+  );
+  animation: drift-b 46s ease-in-out infinite;
 }
-.markdown-body pre code {
-  @apply text-sm text-[#0e3b43];
+
+/* Deep-blue counter-light keeps the middle of large viewports from going flat */
+.atmo-deep {
+  left: 32%;
+  top: 34%;
+  width: 46vw;
+  height: 46vh;
+  background: radial-gradient(closest-side, rgb(var(--c-azure-deep) / 0.1) 0%, transparent 70%);
+  animation: drift-a 58s ease-in-out infinite reverse;
 }
-.markdown-body blockquote {
-  @apply border-l-2 border-cyan-500 pl-4 py-1 italic text-teal-800/70 bg-[#cbf0f8]/50 rounded-r-lg mb-4;
+/* Technical grid, faded out towards the edges so it reads as depth not decor */
+.atmo-grid {
+  inset: 0;
+  background-image:
+    linear-gradient(to right, rgb(var(--c-accent) / 0.055) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(var(--c-accent) / 0.055) 1px, transparent 1px);
+  background-size: 64px 64px;
+  background-position: center top;
+  -webkit-mask-image: radial-gradient(ellipse 85% 60% at 50% 0%, #000 0%, transparent 78%);
+  mask-image: radial-gradient(ellipse 85% 60% at 50% 0%, #000 0%, transparent 78%);
+  animation: none;
+}
+
+/* Film grain: one 160px tile, rasterised once, no animation */
+.atmo-noise {
+  inset: 0;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Edge vignette + a single bright hairline along the very top of the viewport */
+.atmo-vignette {
+  inset: 0;
+  background:
+    radial-gradient(130% 100% at 50% 50%, transparent 55%, rgb(0 0 0 / 0.55) 100%),
+    linear-gradient(180deg, rgb(var(--c-accent) / 0.1) 0px, transparent 1.5px);
+}
+
+/* Horizon light that sits under the composer and anchors the bottom edge */
+.atmo-horizon {
+  left: 50%;
+  bottom: -14vh;
+  width: min(120vw, 1400px);
+  height: 34vh;
+  transform: translateX(-50%);
+  background: radial-gradient(
+    closest-side,
+    rgb(var(--c-accent) / 0.11) 0%,
+    rgb(var(--c-azure) / 0.05) 50%,
+    transparent 78%
+  );
+}
+
+/* Reusable local glow for individual components (logo marks, empty states) */
+.glow-orb {
+  position: absolute;
+  border-radius: 9999px;
+  pointer-events: none;
+  background: radial-gradient(closest-side, rgb(var(--c-accent) / 0.35), transparent 72%);
+}
+/* ==========================================================================
+   COMPONENT PRIMITIVES
+   ========================================================================== */
+
+@layer components {
+  /* -- Buttons ----------------------------------------------------------- */
+  .btn {
+    @apply relative inline-flex select-none items-center justify-center gap-2
+      whitespace-nowrap rounded-lg px-4 py-2.5 text-sub font-semibold
+      transition-all duration-fast ease-standard
+      disabled:pointer-events-none disabled:opacity-45;
+    min-height: 2.5rem;
+  }
+
+  .btn-primary {
+    @apply text-ink-inverse shadow-glow-sm;
+    background-image: linear-gradient(135deg, rgb(var(--c-accent-soft)) 0%, rgb(var(--c-accent)) 45%, rgb(var(--c-azure)) 100%);
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    @apply shadow-glow brightness-110;
+  }
+
+  .btn-primary:active:not(:disabled) {
+    @apply scale-[0.985] brightness-95;
+  }
+
+  .btn-secondary {
+    @apply border border-line bg-surface-2 text-ink shadow-subtle;
+  }
+
+  .btn-secondary:hover:not(:disabled) {
+    @apply border-line-strong bg-surface-3;
+  }
+
+  .btn-secondary:active:not(:disabled) {
+    @apply scale-[0.985] bg-surface-4;
+  }
+
+  .btn-ghost {
+    @apply text-ink-dim;
+  }
+
+  .btn-ghost:hover:not(:disabled) {
+    @apply bg-surface-3/70 text-ink;
+  }
+
+  .btn-danger {
+    @apply border border-danger/35 bg-danger/10 text-danger;
+  }
+
+  .btn-danger:hover:not(:disabled) {
+    @apply border-danger/60 bg-danger/20;
+  }
+
+  .btn-sm {
+    @apply rounded-md px-3 py-1.5 text-cap;
+    min-height: 2rem;
+  }
+
+  .btn-lg {
+    @apply rounded-lg px-5 text-body;
+    min-height: 3rem;
+  }
+  /* -- Icon buttons: 40px hit area everywhere, incl. touch --------------- */
+  .icon-btn {
+    @apply inline-flex shrink-0 items-center justify-center rounded-md text-ink-dim
+      transition-colors duration-fast ease-standard
+      hover:bg-surface-3 hover:text-ink
+      disabled:pointer-events-none disabled:opacity-40;
+    width: 2.25rem;
+    height: 2.25rem;
+  }
+
+  .icon-btn-danger:hover {
+    @apply bg-danger/15 text-danger;
+  }
+
+  .icon-btn-accent:hover {
+    @apply bg-accent/15 text-accent;
+  }
+
+  /* Filled icon button for the one primary action in a compact context */
+  .icon-btn-primary {
+    @apply text-ink-inverse shadow-glow-sm;
+    background-image: linear-gradient(135deg, rgb(var(--c-accent-soft)) 0%, rgb(var(--c-accent)) 45%, rgb(var(--c-azure)) 100%);
+  }
+
+  .icon-btn-primary:hover:not(:disabled) {
+    @apply text-ink-inverse shadow-glow;
+    filter: saturate(1.12) brightness(1.06);
+  }
+
+  .icon-btn-primary:active:not(:disabled) {
+    @apply scale-[0.96];
+  }
+
+  /* -- Surfaces ---------------------------------------------------------- */
+  .panel {
+    @apply rounded-xl border border-line bg-surface-2/85 shadow-elevated backdrop-blur-md;
+  }
+
+  .panel-flat {
+    @apply rounded-lg border border-line-subtle bg-surface-2/60;
+  }
+
+  /* A 1px top highlight sells the idea of light falling on a raised surface */
+  .hairline::before {
+    content: "";
+    @apply pointer-events-none absolute inset-x-0 top-0 h-px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgb(var(--c-accent) / 0.35) 20%,
+      rgb(var(--c-accent) / 0.35) 80%,
+      transparent
+    );
+  }
+
+  /* -- Form fields ------------------------------------------------------- */
+  .field {
+    @apply w-full rounded-lg border border-line bg-surface-2/80 px-3.5 py-2.5
+      text-sub text-ink placeholder:text-ink-faint
+      transition-all duration-fast ease-standard
+      hover:border-line-strong;
+  }
+
+  .field:focus {
+    @apply border-accent/70 bg-surface-2 outline-none;
+    box-shadow: 0 0 0 3px rgb(var(--c-accent) / 0.16);
+  }
+
+  .field-invalid,
+  .field[aria-invalid="true"] {
+    @apply border-danger/70;
+  }
+
+  .field-invalid:focus,
+  .field[aria-invalid="true"]:focus {
+    box-shadow: 0 0 0 3px rgb(var(--c-danger) / 0.18);
+  }
+  /* -- Chips / badges ---------------------------------------------------- */
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-pill border border-line
+      bg-surface-2/70 px-2.5 py-1 text-cap text-ink-dim;
+  }
+
+  .chip-accent {
+    @apply border-accent/30 bg-accent/10 text-accent;
+  }
+
+  .eyebrow {
+    @apply text-label uppercase text-ink-faint;
+  }
+
+  .divider {
+    @apply h-px w-full border-0 bg-line-subtle;
+  }
+
+  /* -- Loading skeleton -------------------------------------------------- */
+  .skeleton {
+    @apply relative overflow-hidden rounded-md bg-surface-3/60;
+  }
+
+  .skeleton::after {
+    content: "";
+    @apply absolute inset-y-0 w-1/3;
+    background: linear-gradient(90deg, transparent, rgb(var(--c-accent) / 0.09), transparent);
+    animation: sweep-x 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  }
+
+  /* -- CSS-only tooltip, used by the collapsed navigation rail ----------- */
+  .tip {
+    @apply relative;
+  }
+
+  .tip::after {
+    content: attr(data-tip);
+    @apply pointer-events-none absolute left-full top-1/2 z-chrome ml-3 -translate-y-1/2
+      whitespace-nowrap rounded-md border border-line bg-surface-3 px-2.5 py-1.5
+      text-cap font-medium text-ink opacity-0 shadow-elevated
+      transition-opacity duration-fast ease-standard;
+  }
+
+  .tip:hover::after,
+  .tip:focus-visible::after {
+    @apply opacity-100;
+  }
+
+  /* Right-aligned below the trigger — for controls near the viewport edge */
+  .tip-below::after {
+    @apply left-auto right-0 top-full ml-0 mt-2 translate-y-0;
+  }
+
+  /* Right-aligned above the trigger — for a control that sits at the bottom
+     edge of a panel that clips its own overflow, where a tip hanging below
+     would simply be cut off. */
+  .tip-above::after {
+    @apply bottom-full left-auto right-0 top-auto mb-2 ml-0 translate-y-0;
+  }
+  /* -- Vertical accent rule marking the active item in a list ------------ */
+  .active-rule::before {
+    content: "";
+    @apply absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-r-pill bg-accent;
+    box-shadow: 0 0 10px 0 rgb(var(--c-accent) / 0.65);
+  }
+}
+
+/* ==========================================================================
+   MARKDOWN — assistant responses. Typography does the work; surfaces are
+   used only where structure genuinely needs them (code, quotes, tables).
+   ========================================================================== */
+
+.md {
+  @apply text-body text-ink/95;
+}
+
+.md > *:first-child {
+  margin-top: 0;
+}
+
+.md > *:last-child {
+  margin-bottom: 0;
+}
+
+.md p {
+  @apply my-3.5;
+}
+
+.md h1,
+.md h2,
+.md h3,
+.md h4 {
+  @apply mb-2.5 mt-6 font-semibold text-ink;
+  letter-spacing: -0.015em;
+}
+
+.md h1 {
+  @apply text-title;
+}
+
+.md h2 {
+  @apply pb-1.5 text-head;
+  border-bottom: 1px solid rgb(var(--c-line-subtle));
+}
+
+.md h3 {
+  @apply text-[0.9375rem];
+}
+
+.md h4 {
+  @apply text-sub text-ink-dim;
+}
+.md strong {
+  @apply font-semibold text-ink;
+}
+
+.md em {
+  @apply italic text-ink;
+}
+
+.md a {
+  @apply font-medium text-accent underline decoration-accent/35 underline-offset-2
+    transition-colors duration-fast hover:decoration-accent;
+}
+
+.md ul,
+.md ol {
+  @apply my-3.5 space-y-1.5 pl-5;
+}
+
+.md ul {
+  @apply list-outside list-disc;
+}
+
+.md ol {
+  @apply list-outside list-decimal;
+}
+
+.md li::marker {
+  color: rgb(var(--c-accent) / 0.8);
+}
+
+.md li > ul,
+.md li > ol {
+  @apply my-1.5;
+}
+
+.md li p {
+  @apply my-1;
+}
+
+/* Inline code */
+.md :not(pre) > code {
+  @apply rounded border border-accent/20 bg-accent/10 px-1.5 py-0.5 font-mono
+    text-[0.8125em] text-accent-soft;
+  word-break: break-word;
+}
+
+/* Fenced blocks */
+.md pre {
+  @apply my-4 overflow-x-auto rounded-lg border border-line bg-surface-0/70 p-4 shadow-subtle;
+}
+
+.md pre code {
+  @apply block font-mono text-code text-ink/90;
+  background: none;
+  border: 0;
+  padding: 0;
+}
+
+.md blockquote {
+  @apply my-4 rounded-r-md border-l-2 border-accent/60 bg-accent/[0.055] py-2 pl-4 pr-3 text-ink-dim;
+}
+
+.md blockquote p {
+  @apply my-1.5;
+}
+/* GFM tables — scrollable so long tables never break the layout */
+.md table {
+  @apply my-4 w-full border-collapse overflow-hidden rounded-lg text-cap;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.md thead {
+  @apply bg-surface-3/60;
+}
+
+.md th {
+  @apply border border-line px-3 py-2 text-left font-semibold text-ink;
+}
+
+.md td {
+  @apply border border-line-subtle px-3 py-2 align-top text-ink-dim;
+}
+
+.md tbody tr:hover td {
+  @apply bg-surface-3/35;
+}
+
+.md hr {
+  @apply my-6 border-0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgb(var(--c-line-strong)), transparent);
+}
+
+.md img {
+  @apply my-4 max-w-full rounded-lg border border-line;
+}
+
+.md input[type="checkbox"] {
+  @apply mr-1.5 accent-accent;
+}
+
+.md :where(h1, h2, h3, h4) + * {
+  margin-top: 0;
+}
+
+/* ==========================================================================
+   REDUCED MOTION
+   Ambient/decorative motion is removed outright; functional feedback
+   (spinners, progress, state transitions) is preserved but made near-instant.
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  .atmosphere > *,
+  .animate-drift-a,
+  .animate-drift-b,
+  .animate-breathe,
+  .animate-caret-blink,
+  .motion-ambient {
+    animation: none !important;
+  }
+
+  .animate-rise,
+  .animate-rise-sm,
+  .animate-scale-in,
+  .animate-slide-in-left,
+  .animate-fade-in {
+    animation-duration: 1ms !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition-duration: 60ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Slow the essential indicators rather than freezing them */
+  .animate-spin,
+  .animate-spin-slow,
+  .animate-spin-medium,
+  .animate-spin-reverse,
+  .animate-dot-pulse,
+  .animate-sweep-x,
+  .skeleton::after {
+    animation-duration: 2.4s !important;
+  }
 }
